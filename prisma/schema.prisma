@@ -1,0 +1,84 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         String   @default("rep") // admin, manager, rep
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  deals       Deal[]
+  commissions Commission[]
+  plan        CommissionPlan? @relation(fields: [planId], references: [id])
+  planId      String?
+}
+
+model CommissionPlan {
+  id          String   @id @default(cuid())
+  name        String
+  description String   @default("")
+  // Plan type: "flat_rate" | "tiered" | "accelerator"
+  planType    String   @default("flat_rate")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tiers       PlanTier[]
+  users       User[]
+  commissions Commission[]
+}
+
+model PlanTier {
+  id         String @id @default(cuid())
+  planId     String
+  plan       CommissionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  minAmount  Float  @default(0)
+  maxAmount  Float? // null = unlimited
+  rate       Float  // percentage as decimal e.g. 0.10 = 10%
+  orderIndex Int    @default(0)
+}
+
+model Deal {
+  id          String   @id @default(cuid())
+  name        String
+  amount      Float
+  status      String   @default("open") // open, closed_won, closed_lost
+  closeDate   DateTime?
+  repId       String
+  rep         User     @relation(fields: [repId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  commissions Commission[]
+}
+
+model Commission {
+  id        String   @id @default(cuid())
+  amount    Float
+  status    String   @default("pending") // pending, approved, paid
+  period    String   // e.g. "2024-01" for January 2024
+  dealId    String
+  deal      Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  repId     String
+  rep       User     @relation(fields: [repId], references: [id])
+  planId    String
+  plan      CommissionPlan @relation(fields: [planId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model QuotaPeriod {
+  id         String   @id @default(cuid())
+  period     String   // e.g. "2024-Q1" or "2024-01"
+  targetAmount Float
+  periodType String   @default("monthly") // monthly, quarterly
+  createdAt  DateTime @default(now())
+}
