@@ -9,6 +9,7 @@ export async function GET() {
     const plans = await prisma.commissionPlan.findMany({
       include: {
         tiers: { orderBy: { orderIndex: 'asc' } },
+        rampSchedule: { orderBy: { month: 'asc' } },
         _count: { select: { users: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -23,13 +24,18 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     await requireAdmin()
-    const { name, description, planType, tiers } = await req.json()
+    const { name, description, planType, tiers, ote, baseSalary, quotaAmount, payFrequency, hasRamp, rampSchedule } = await req.json()
 
     const plan = await prisma.commissionPlan.create({
       data: {
         name,
         description: description || '',
         planType: planType || 'flat_rate',
+        ote: ote ? parseFloat(ote) : 0,
+        baseSalary: baseSalary ? parseFloat(baseSalary) : 0,
+        quotaAmount: quotaAmount ? parseFloat(quotaAmount) : 0,
+        payFrequency: payFrequency || 'monthly',
+        hasRamp: hasRamp || false,
         tiers: {
           create: (tiers || []).map((tier: { minAmount: number; maxAmount: number | null; rate: number }, index: number) => ({
             minAmount: tier.minAmount || 0,
@@ -38,9 +44,17 @@ export async function POST(req: NextRequest) {
             orderIndex: index,
           })),
         },
+        rampSchedule: hasRamp && rampSchedule ? {
+          create: rampSchedule.map((r: { month: number; quotaPct: number; commissionPct: number }) => ({
+            month: r.month,
+            quotaPct: r.quotaPct,
+            commissionPct: r.commissionPct,
+          })),
+        } : undefined,
       },
       include: {
         tiers: { orderBy: { orderIndex: 'asc' } },
+        rampSchedule: { orderBy: { month: 'asc' } },
       },
     })
 

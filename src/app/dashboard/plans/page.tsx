@@ -15,7 +15,13 @@ interface Plan {
   name: string
   description: string
   planType: string
+  ote: number
+  baseSalary: number
+  quotaAmount: number
+  payFrequency: string
+  hasRamp: boolean
   tiers: Tier[]
+  rampSchedule: { month: number; quotaPct: number; commissionPct: number }[]
   _count: { users: number }
   createdAt: string
 }
@@ -48,6 +54,10 @@ export default function PlansPage() {
   const [formName, setFormName] = useState('')
   const [formDescription, setFormDescription] = useState('')
   const [formPlanType, setFormPlanType] = useState('flat_rate')
+  const [formOte, setFormOte] = useState('')
+  const [formBaseSalary, setFormBaseSalary] = useState('')
+  const [formQuotaAmount, setFormQuotaAmount] = useState('')
+  const [formPayFrequency, setFormPayFrequency] = useState('monthly')
   const [formTiers, setFormTiers] = useState<Tier[]>([
     { minAmount: 0, maxAmount: null, rate: 0.1, orderIndex: 0 },
   ])
@@ -68,6 +78,10 @@ export default function PlansPage() {
     setFormName('')
     setFormDescription('')
     setFormPlanType('flat_rate')
+    setFormOte('')
+    setFormBaseSalary('')
+    setFormQuotaAmount('')
+    setFormPayFrequency('monthly')
     setFormTiers([{ minAmount: 0, maxAmount: null, rate: 0.1, orderIndex: 0 }])
     setShowForm(true)
   }
@@ -77,6 +91,10 @@ export default function PlansPage() {
     setFormName(plan.name)
     setFormDescription(plan.description)
     setFormPlanType(plan.planType)
+    setFormOte(plan.ote ? plan.ote.toString() : '')
+    setFormBaseSalary(plan.baseSalary ? plan.baseSalary.toString() : '')
+    setFormQuotaAmount(plan.quotaAmount ? plan.quotaAmount.toString() : '')
+    setFormPayFrequency(plan.payFrequency)
     setFormTiers(
       plan.tiers.length > 0
         ? plan.tiers.map((t) => ({ ...t }))
@@ -122,6 +140,10 @@ export default function PlansPage() {
       name: formName,
       description: formDescription,
       planType: formPlanType,
+      ote: formOte,
+      baseSalary: formBaseSalary,
+      quotaAmount: formQuotaAmount,
+      payFrequency: formPayFrequency,
       tiers: formTiers.map((t, i) => ({
         minAmount: t.minAmount,
         maxAmount: t.maxAmount,
@@ -179,7 +201,7 @@ export default function PlansPage() {
       {/* Plan Form Modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-auto py-8">
-          <div className="bg-white rounded-xl p-6 w-full max-w-lg shadow-xl">
+          <div className="bg-white rounded-xl p-6 w-full max-w-lg shadow-xl max-h-[90vh] overflow-y-auto">
             <h2 className="text-lg font-bold mb-4">
               {editingPlan ? 'Edit Plan' : 'New Commission Plan'}
             </h2>
@@ -204,6 +226,63 @@ export default function PlansPage() {
                   rows={2}
                 />
               </div>
+
+              {/* Compensation Structure */}
+              <div className="border-t pt-4">
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">Compensation Structure</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="label">OTE (Annual)</label>
+                    <input
+                      type="number"
+                      className="input"
+                      value={formOte}
+                      onChange={(e) => setFormOte(e.target.value)}
+                      placeholder="150000"
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Base Salary</label>
+                    <input
+                      type="number"
+                      className="input"
+                      value={formBaseSalary}
+                      onChange={(e) => setFormBaseSalary(e.target.value)}
+                      placeholder="75000"
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Annual Quota</label>
+                    <input
+                      type="number"
+                      className="input"
+                      value={formQuotaAmount}
+                      onChange={(e) => setFormQuotaAmount(e.target.value)}
+                      placeholder="600000"
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Pay Frequency</label>
+                    <select
+                      className="input"
+                      value={formPayFrequency}
+                      onChange={(e) => setFormPayFrequency(e.target.value)}
+                    >
+                      <option value="monthly">Monthly</option>
+                      <option value="quarterly">Quarterly</option>
+                    </select>
+                  </div>
+                </div>
+                {formOte && formBaseSalary && (
+                  <p className="text-xs text-gray-500 mt-2">
+                    Variable pay: {formatCurrency(parseFloat(formOte || '0') - parseFloat(formBaseSalary || '0'))}/yr
+                    {formQuotaAmount && (
+                      <> | Effective rate at OTE: {formatPercent((parseFloat(formOte || '0') - parseFloat(formBaseSalary || '0')) / parseFloat(formQuotaAmount || '1'))}</>
+                    )}
+                  </p>
+                )}
+              </div>
+
               <div>
                 <label className="label">Plan Type</label>
                 <select
@@ -249,9 +328,7 @@ export default function PlansPage() {
                               type="number"
                               className="input mt-1"
                               value={tier.minAmount}
-                              onChange={(e) =>
-                                updateTier(idx, 'minAmount', e.target.value)
-                              }
+                              onChange={(e) => updateTier(idx, 'minAmount', e.target.value)}
                               min="0"
                             />
                           </div>
@@ -261,9 +338,7 @@ export default function PlansPage() {
                               type="number"
                               className="input mt-1"
                               value={tier.maxAmount ?? ''}
-                              onChange={(e) =>
-                                updateTier(idx, 'maxAmount', e.target.value)
-                              }
+                              onChange={(e) => updateTier(idx, 'maxAmount', e.target.value)}
                               placeholder="No limit"
                             />
                           </div>
@@ -344,6 +419,36 @@ export default function PlansPage() {
               <p className="text-sm text-gray-500 mb-3">{plan.description}</p>
             )}
 
+            {/* OTE / Compensation Info */}
+            {(plan.ote > 0 || plan.quotaAmount > 0) && (
+              <div className="grid grid-cols-2 gap-2 mb-3 p-3 bg-brand-50 rounded-lg text-sm">
+                {plan.ote > 0 && (
+                  <div>
+                    <span className="text-gray-500">OTE</span>
+                    <p className="font-semibold text-brand-700">{formatCurrency(plan.ote)}</p>
+                  </div>
+                )}
+                {plan.baseSalary > 0 && (
+                  <div>
+                    <span className="text-gray-500">Base</span>
+                    <p className="font-semibold text-gray-700">{formatCurrency(plan.baseSalary)}</p>
+                  </div>
+                )}
+                {plan.quotaAmount > 0 && (
+                  <div>
+                    <span className="text-gray-500">Quota</span>
+                    <p className="font-semibold text-gray-700">{formatCurrency(plan.quotaAmount)}</p>
+                  </div>
+                )}
+                {plan.ote > 0 && plan.baseSalary > 0 && (
+                  <div>
+                    <span className="text-gray-500">Variable</span>
+                    <p className="font-semibold text-amber-600">{formatCurrency(plan.ote - plan.baseSalary)}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="space-y-2 mb-4">
               {plan.tiers.map((tier, idx) => (
                 <div
@@ -364,10 +469,11 @@ export default function PlansPage() {
               ))}
             </div>
 
-            <div className="pt-3 border-t border-gray-100">
+            <div className="pt-3 border-t border-gray-100 flex items-center justify-between">
               <span className="text-xs text-gray-500">
                 {plan._count.users} {plan._count.users === 1 ? 'rep' : 'reps'} assigned
               </span>
+              <span className="text-xs text-gray-400 capitalize">{plan.payFrequency}</span>
             </div>
           </div>
         ))}

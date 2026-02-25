@@ -19,12 +19,16 @@ async function main() {
     },
   })
 
-  // Create commission plans
+  // Create commission plans with OTE, base salary, and quota
   const flatPlan = await prisma.commissionPlan.create({
     data: {
       name: 'Standard 10%',
       description: 'Flat 10% commission on all closed-won deals',
       planType: 'flat_rate',
+      ote: 120000,
+      baseSalary: 60000,
+      quotaAmount: 600000,
+      payFrequency: 'monthly',
       tiers: {
         create: [{ minAmount: 0, maxAmount: null, rate: 0.10, orderIndex: 0 }],
       },
@@ -34,8 +38,12 @@ async function main() {
   const tieredPlan = await prisma.commissionPlan.create({
     data: {
       name: 'Tiered Growth',
-      description: 'Higher rates for larger deals',
+      description: 'Higher rates for larger deals - rewards bigger wins',
       planType: 'tiered',
+      ote: 150000,
+      baseSalary: 75000,
+      quotaAmount: 750000,
+      payFrequency: 'monthly',
       tiers: {
         create: [
           { minAmount: 0, maxAmount: 10000, rate: 0.08, orderIndex: 0 },
@@ -49,13 +57,25 @@ async function main() {
   const acceleratorPlan = await prisma.commissionPlan.create({
     data: {
       name: 'Accelerator',
-      description: 'Higher rates as you close more revenue',
+      description: 'Higher rates as you close more revenue - rewards overachievers',
       planType: 'accelerator',
+      ote: 180000,
+      baseSalary: 80000,
+      quotaAmount: 1000000,
+      payFrequency: 'monthly',
+      hasRamp: true,
       tiers: {
         create: [
-          { minAmount: 0, maxAmount: 25000, rate: 0.08, orderIndex: 0 },
-          { minAmount: 25000, maxAmount: 75000, rate: 0.10, orderIndex: 1 },
-          { minAmount: 75000, maxAmount: null, rate: 0.15, orderIndex: 2 },
+          { minAmount: 0, maxAmount: 250000, rate: 0.08, orderIndex: 0 },
+          { minAmount: 250000, maxAmount: 750000, rate: 0.10, orderIndex: 1 },
+          { minAmount: 750000, maxAmount: null, rate: 0.15, orderIndex: 2 },
+        ],
+      },
+      rampSchedule: {
+        create: [
+          { month: 1, quotaPct: 0.25, commissionPct: 1.0 },
+          { month: 2, quotaPct: 0.50, commissionPct: 1.0 },
+          { month: 3, quotaPct: 0.75, commissionPct: 1.0 },
         ],
       },
     },
@@ -100,8 +120,32 @@ async function main() {
     },
   })
 
-  // Create sample deals
+  // Set quota targets for all reps for current year
   const now = new Date()
+  const year = now.getFullYear()
+  const reps = [
+    { id: rep1.id, monthlyQuota: 62500 },   // 750k / 12
+    { id: rep2.id, monthlyQuota: 83333 },   // 1M / 12
+    { id: rep3.id, monthlyQuota: 50000 },   // 600k / 12
+  ]
+
+  for (const rep of reps) {
+    for (let month = 1; month <= 12; month++) {
+      const period = `${year}-${String(month).padStart(2, '0')}`
+      await prisma.quotaTarget.create({
+        data: {
+          repId: rep.id,
+          period,
+          periodType: 'monthly',
+          targetAmount: rep.monthlyQuota,
+        },
+      })
+    }
+  }
+
+  console.log('  Created quota targets for all reps')
+
+  // Create sample deals
   const thisMonth = new Date(now.getFullYear(), now.getMonth(), 15)
   const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 15)
   const twoMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 2, 15)

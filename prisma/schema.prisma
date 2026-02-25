@@ -16,10 +16,11 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  deals       Deal[]
-  commissions Commission[]
-  plan        CommissionPlan? @relation(fields: [planId], references: [id])
-  planId      String?
+  deals        Deal[]
+  commissions  Commission[]
+  plan         CommissionPlan? @relation(fields: [planId], references: [id])
+  planId       String?
+  quotaTargets QuotaTarget[]
 }
 
 model CommissionPlan {
@@ -28,10 +29,16 @@ model CommissionPlan {
   description String   @default("")
   // Plan type: "flat_rate" | "tiered" | "accelerator"
   planType    String   @default("flat_rate")
+  ote         Float    @default(0) // On-Target Earnings (annual)
+  baseSalary  Float    @default(0) // Base salary component
+  quotaAmount Float    @default(0) // Default quota for this plan
+  payFrequency String  @default("monthly") // monthly, quarterly
+  hasRamp     Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   tiers       PlanTier[]
+  rampSchedule RampPeriod[]
   users       User[]
   commissions Commission[]
 }
@@ -44,6 +51,15 @@ model PlanTier {
   maxAmount  Float? // null = unlimited
   rate       Float  // percentage as decimal e.g. 0.10 = 10%
   orderIndex Int    @default(0)
+}
+
+model RampPeriod {
+  id         String @id @default(cuid())
+  planId     String
+  plan       CommissionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  month      Int    // month number (1, 2, 3, etc.)
+  quotaPct   Float  // quota percentage during ramp e.g. 0.50 = 50%
+  commissionPct Float // commission percentage during ramp e.g. 1.0 = 100%
 }
 
 model Deal {
@@ -75,10 +91,15 @@ model Commission {
   updatedAt DateTime @updatedAt
 }
 
-model QuotaPeriod {
-  id         String   @id @default(cuid())
-  period     String   // e.g. "2024-Q1" or "2024-01"
+model QuotaTarget {
+  id           String   @id @default(cuid())
+  repId        String
+  rep          User     @relation(fields: [repId], references: [id], onDelete: Cascade)
+  period       String   // "2024-01" for monthly, "2024-Q1" for quarterly
+  periodType   String   @default("monthly") // monthly, quarterly, annual
   targetAmount Float
-  periodType String   @default("monthly") // monthly, quarterly
-  createdAt  DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([repId, period])
 }

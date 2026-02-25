@@ -9,7 +9,6 @@ export async function GET() {
 
     const repFilter = isAdmin ? {} : { repId: user.id }
 
-    // Get current period
     const now = new Date()
     const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 
@@ -48,7 +47,59 @@ export async function GET() {
     })
     const paidAmount = paidCommissions._sum.amount || 0
 
-    // Monthly trend (last 6 months)
+    // Quota attainment for current period
+    let currentQuota = 0
+    let currentRevenue = 0
+
+    if (isAdmin) {
+      // Sum all rep quotas for current period
+      const quotaSum = await prisma.quotaTarget.aggregate({
+        where: { period: currentPeriod },
+        _sum: { targetAmount: true },
+      })
+      currentQuota = quotaSum._sum.targetAmount || 0
+
+      const revSum = await prisma.deal.aggregate({
+        where: {
+          status: 'closed_won',
+          closeDate: {
+            gte: new Date(now.getFullYear(), now.getMonth(), 1),
+            lt: new Date(now.getFullYear(), now.getMonth() + 1, 1),
+          },
+        },
+        _sum: { amount: true },
+      })
+      currentRevenue = revSum._sum.amount || 0
+    } else {
+      const quota = await prisma.quotaTarget.findUnique({
+        where: { repId_period: { repId: user.id, period: currentPeriod } },
+      })
+      currentQuota = quota?.targetAmount || 0
+
+      const revSum = await prisma.deal.aggregate({
+        where: {
+          repId: user.id,
+          status: 'closed_won',
+          closeDate: {
+            gte: new Date(now.getFullYear(), now.getMonth(), 1),
+            lt: new Date(now.getFullYear(), now.getMonth() + 1, 1),
+          },
+        },
+        _sum: { amount: true },
+      })
+      currentRevenue = revSum._sum.amount || 0
+    }
+
+    const attainmentPct = currentQuota > 0 ? currentRevenue / currentQuota : 0
+
+    // Pipeline value
+    const pipelineResult = await prisma.deal.aggregate({
+      where: { ...repFilter, status: 'open' },
+      _sum: { amount: true },
+    })
+    const pipelineValue = pipelineResult._sum.amount || 0
+
+    // Monthly trend (last 6 months) with quota
     const monthlyData = []
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
@@ -71,34 +122,69 @@ export async function GET() {
         _sum: { amount: true },
       })
 
+      // Quota for this period
+      let monthQuota = 0
+      if (isAdmin) {
+        const q = await prisma.quotaTarget.aggregate({
+          where: { period },
+          _sum: { targetAmount: true },
+        })
+        monthQuota = q._sum.targetAmount || 0
+      } else {
+        const q = await prisma.quotaTarget.findUnique({
+          where: { repId_period: { repId: user.id, period } },
+        })
+        monthQuota = q?.targetAmount || 0
+      }
+
       monthlyData.push({
         period,
         label: d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
         revenue: monthRevenue._sum.amount || 0,
+        quota: monthQuota,
         commissions: monthCommissions._sum.amount || 0,
       })
     }
 
     // Top reps (admin only)
-    let topReps: { name: string; total: number }[] = []
+    let topReps: { name: string; total: number; attainment: number }[] = []
     if (isAdmin) {
       const reps = await prisma.user.findMany({
         where: { role: 'rep' },
         select: {
+          id: true,
           name: true,
-          commissions: {
-            select: { amount: true },
-          },
+          commissions: { select: { amount: true } },
         },
       })
 
-      topReps = reps
-        .map((r) => ({
+      const repData = []
+      for (const r of reps) {
+        const quota = await prisma.quotaTarget.findUnique({
+          where: { repId_period: { repId: r.id, period: currentPeriod } },
+        })
+        const rev = await prisma.deal.aggregate({
+          where: {
+            repId: r.id,
+            status: 'closed_won',
+            closeDate: {
+              gte: new Date(now.getFullYear(), now.getMonth(), 1),
+              lt: new Date(now.getFullYear(), now.getMonth() + 1, 1),
+            },
+          },
+          _sum: { amount: true },
+        })
+
+        repData.push({
           name: r.name,
           total: r.commissions.reduce((sum, c) => sum + c.amount, 0),
-        }))
-        .sort((a, b) => b.total - a.total)
-        .slice(0, 5)
+          attainment: quota?.targetAmount
+            ? (rev._sum.amount || 0) / quota.targetAmount
+            : 0,
+        })
+      }
+
+      topReps = repData.sort((a, b) => b.total - a.total).slice(0, 5)
     }
 
     return NextResponse.json({
@@ -110,6 +196,10 @@ export async function GET() {
       totalCommissions,
       pendingAmount,
       paidAmount,
+      pipelineValue,
+      currentQuota,
+      currentRevenue,
+      attainmentPct,
       monthlyData,
       topReps,
     })
