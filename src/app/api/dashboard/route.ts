@@ -1,209 +1,147 @@
 import { NextResponse } from 'next/server'
+import { getServerSession } from 'next-auth'
+import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
-import { requireAuth } from '@/lib/auth'
+import { Decimal } from 'decimal.js'
+
+function dateToPeriod(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+}
 
 export async function GET() {
   try {
-    const user = await requireAuth()
-    const isAdmin = user.role === 'admin' || user.role === 'manager'
+    const session = await getServerSession(authOptions)
+    if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const repFilter = isAdmin ? {} : { repId: user.id }
-
+    const { id: userId, role } = session.user
     const now = new Date()
-    const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    const currentPeriod = dateToPeriod(now)
 
-    // Total deals
-    const totalDeals = await prisma.deal.count({ where: repFilter })
-    const closedWonDeals = await prisma.deal.count({
-      where: { ...repFilter, status: 'closed_won' },
-    })
-    const openDeals = await prisma.deal.count({
-      where: { ...repFilter, status: 'open' },
-    })
-
-    // Deal revenue
-    const revenueResult = await prisma.deal.aggregate({
-      where: { ...repFilter, status: 'closed_won' },
-      _sum: { amount: true },
-    })
-    const totalRevenue = revenueResult._sum.amount || 0
-
-    // Commission stats
-    const commissionResult = await prisma.commission.aggregate({
-      where: repFilter,
-      _sum: { amount: true },
-    })
-    const totalCommissions = commissionResult._sum.amount || 0
-
-    const pendingCommissions = await prisma.commission.aggregate({
-      where: { ...repFilter, status: 'pending' },
-      _sum: { amount: true },
-    })
-    const pendingAmount = pendingCommissions._sum.amount || 0
-
-    const paidCommissions = await prisma.commission.aggregate({
-      where: { ...repFilter, status: 'paid' },
-      _sum: { amount: true },
-    })
-    const paidAmount = paidCommissions._sum.amount || 0
-
-    // Quota attainment for current period
-    let currentQuota = 0
-    let currentRevenue = 0
-
-    if (isAdmin) {
-      // Sum all rep quotas for current period
-      const quotaSum = await prisma.quotaTarget.aggregate({
-        where: { period: currentPeriod },
-        _sum: { targetAmount: true },
+    // Build user filter based on role
+    let userIds: string[]
+    if (role === 'ADMIN') {
+      const allUsers = await prisma.user.findMany({ where: { isActive: true }, select: { id: true } })
+      userIds = allUsers.map(u => u.id)
+    } else if (role === 'MANAGER') {
+      const teamUsers = await prisma.user.findMany({
+        where: { OR: [{ id: userId }, { managerId: userId }], isActive: true },
+        select: { id: true },
       })
-      currentQuota = quotaSum._sum.targetAmount || 0
-
-      const revSum = await prisma.deal.aggregate({
-        where: {
-          status: 'closed_won',
-          closeDate: {
-            gte: new Date(now.getFullYear(), now.getMonth(), 1),
-            lt: new Date(now.getFullYear(), now.getMonth() + 1, 1),
-          },
-        },
-        _sum: { amount: true },
-      })
-      currentRevenue = revSum._sum.amount || 0
+      userIds = teamUsers.map(u => u.id)
     } else {
-      const quota = await prisma.quotaTarget.findUnique({
-        where: { repId_period: { repId: user.id, period: currentPeriod } },
-      })
-      currentQuota = quota?.targetAmount || 0
-
-      const revSum = await prisma.deal.aggregate({
-        where: {
-          repId: user.id,
-          status: 'closed_won',
-          closeDate: {
-            gte: new Date(now.getFullYear(), now.getMonth(), 1),
-            lt: new Date(now.getFullYear(), now.getMonth() + 1, 1),
-          },
-        },
-        _sum: { amount: true },
-      })
-      currentRevenue = revSum._sum.amount || 0
+      userIds = [userId]
     }
 
-    const attainmentPct = currentQuota > 0 ? currentRevenue / currentQuota : 0
-
-    // Pipeline value
-    const pipelineResult = await prisma.deal.aggregate({
-      where: { ...repFilter, status: 'open' },
-      _sum: { amount: true },
+    // Commission entries for current period
+    const currentEntries = await prisma.commissionEntry.findMany({
+      where: { userId: { in: userIds }, period: currentPeriod },
     })
-    const pipelineValue = pipelineResult._sum.amount || 0
 
-    // Monthly trend (last 6 months) with quota
+    const totalCommissions = currentEntries
+      .reduce((sum, e) => sum.add(new Decimal(e.commissionAmount.toString())), new Decimal(0))
+    const pendingAmount = currentEntries
+      .filter(e => e.status === 'PENDING')
+      .reduce((sum, e) => sum.add(new Decimal(e.commissionAmount.toString())), new Decimal(0))
+    const paidAmount = currentEntries
+      .filter(e => e.status === 'PAID')
+      .reduce((sum, e) => sum.add(new Decimal(e.commissionAmount.toString())), new Decimal(0))
+
+    // Revenue from placements this period
+    const periodStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+
+    const placements = await prisma.placement.findMany({
+      where: {
+        ownerUserId: { in: userIds },
+        invoicedDate: { gte: periodStart, lt: periodEnd },
+        paidToAkkar: true,
+      },
+    })
+
+    const totalRevenue = placements
+      .reduce((sum, p) => sum.add(new Decimal(p.nfiValue.toString())), new Decimal(0))
+
+    // Open pipeline
+    const pipelinePlacements = await prisma.placement.findMany({
+      where: { ownerUserId: { in: userIds }, paidToAkkar: false, isClawback: false },
+    })
+    const pipelineValue = pipelinePlacements
+      .reduce((sum, p) => sum.add(new Decimal(p.nfiValue.toString())), new Decimal(0))
+
+    // Target for quota attainment (REP only for personal)
+    const target = role === 'REP'
+      ? await prisma.target.findUnique({ where: { userId_period: { userId, period: currentPeriod } } })
+      : null
+    const currentQuota = target ? Number(target.nfiTargetGBP) : 0
+    const attainmentPct = currentQuota > 0 ? totalRevenue.toNumber() / currentQuota : 0
+
+    // Monthly data (last 6 months)
     const monthlyData = []
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      const period = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      const period = dateToPeriod(d)
+      const mEnd = new Date(d.getFullYear(), d.getMonth() + 1, 1)
+      const label = d.toLocaleString('en-US', { month: 'short' })
 
-      const monthRevenue = await prisma.deal.aggregate({
-        where: {
-          ...repFilter,
-          status: 'closed_won',
-          closeDate: {
-            gte: d,
-            lt: new Date(d.getFullYear(), d.getMonth() + 1, 1),
-          },
-        },
-        _sum: { amount: true },
-      })
+      const [mEntries, mPlacements] = await Promise.all([
+        prisma.commissionEntry.findMany({ where: { userId: { in: userIds }, period } }),
+        prisma.placement.findMany({
+          where: { ownerUserId: { in: userIds }, invoicedDate: { gte: d, lt: mEnd }, paidToAkkar: true },
+        }),
+      ])
 
-      const monthCommissions = await prisma.commission.aggregate({
-        where: { ...repFilter, period },
-        _sum: { amount: true },
-      })
-
-      // Quota for this period
-      let monthQuota = 0
-      if (isAdmin) {
-        const q = await prisma.quotaTarget.aggregate({
-          where: { period },
-          _sum: { targetAmount: true },
-        })
-        monthQuota = q._sum.targetAmount || 0
-      } else {
-        const q = await prisma.quotaTarget.findUnique({
-          where: { repId_period: { repId: user.id, period } },
-        })
-        monthQuota = q?.targetAmount || 0
-      }
+      const mTarget = role === 'REP'
+        ? await prisma.target.findUnique({ where: { userId_period: { userId, period } } })
+        : null
 
       monthlyData.push({
         period,
-        label: d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
-        revenue: monthRevenue._sum.amount || 0,
-        quota: monthQuota,
-        commissions: monthCommissions._sum.amount || 0,
+        label,
+        revenue: mPlacements.reduce((s, p) => s + Number(p.nfiValue), 0),
+        quota: mTarget ? Number(mTarget.nfiTargetGBP) : 0,
+        commissions: mEntries.reduce((s, e) => s + Number(e.commissionAmount), 0),
       })
     }
 
-    // Top reps (admin only)
-    let topReps: { name: string; total: number; attainment: number }[] = []
-    if (isAdmin) {
-      const reps = await prisma.user.findMany({
-        where: { role: 'rep' },
-        select: {
-          id: true,
-          name: true,
-          commissions: { select: { amount: true } },
-        },
+    // Top reps (managers/admins)
+    const topReps: { name: string; total: number; attainment: number }[] = []
+    if (role === 'ADMIN' || role === 'MANAGER') {
+      const teamUsers = await prisma.user.findMany({
+        where: { id: { in: userIds }, isActive: true },
+        select: { id: true, name: true },
       })
-
-      const repData = []
-      for (const r of reps) {
-        const quota = await prisma.quotaTarget.findUnique({
-          where: { repId_period: { repId: r.id, period: currentPeriod } },
+      for (const u of teamUsers) {
+        const entries = await prisma.commissionEntry.findMany({
+          where: { userId: u.id, period: currentPeriod },
         })
-        const rev = await prisma.deal.aggregate({
-          where: {
-            repId: r.id,
-            status: 'closed_won',
-            closeDate: {
-              gte: new Date(now.getFullYear(), now.getMonth(), 1),
-              lt: new Date(now.getFullYear(), now.getMonth() + 1, 1),
-            },
-          },
-          _sum: { amount: true },
+        const total = entries.reduce((s, e) => s + Number(e.commissionAmount), 0)
+        const uTarget = await prisma.target.findUnique({
+          where: { userId_period: { userId: u.id, period: currentPeriod } },
         })
-
-        repData.push({
-          name: r.name,
-          total: r.commissions.reduce((sum, c) => sum + c.amount, 0),
-          attainment: quota?.targetAmount
-            ? (rev._sum.amount || 0) / quota.targetAmount
-            : 0,
-        })
+        const att = uTarget ? total / Number(uTarget.nfiTargetGBP) : 0
+        topReps.push({ name: u.name, total, attainment: att })
       }
-
-      topReps = repData.sort((a, b) => b.total - a.total).slice(0, 5)
+      topReps.sort((a, b) => b.total - a.total)
     }
 
     return NextResponse.json({
       currentPeriod,
-      totalDeals,
-      closedWonDeals,
-      openDeals,
-      totalRevenue,
-      totalCommissions,
-      pendingAmount,
-      paidAmount,
-      pipelineValue,
+      totalDeals: placements.length + pipelinePlacements.length,
+      closedWonDeals: placements.length,
+      openDeals: pipelinePlacements.length,
+      totalRevenue: totalRevenue.toNumber(),
+      totalCommissions: totalCommissions.toNumber(),
+      pendingAmount: pendingAmount.toNumber(),
+      paidAmount: paidAmount.toNumber(),
+      pipelineValue: pipelineValue.toNumber(),
       currentQuota,
-      currentRevenue,
+      currentRevenue: totalRevenue.toNumber(),
       attainmentPct,
       monthlyData,
-      topReps,
+      topReps: topReps.slice(0, 10),
     })
-  } catch {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  } catch (error) {
+    console.error('Dashboard error:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

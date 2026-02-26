@@ -3,103 +3,342 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  name         String
-  passwordHash String
-  role         String   @default("rep") // admin, manager, rep
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+// ─── Auth (NextAuth) ───────────────────────────────────────────────
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  deals        Deal[]
-  commissions  Commission[]
-  plan         CommissionPlan? @relation(fields: [planId], references: [id])
-  planId       String?
-  quotaTargets QuotaTarget[]
+  @@unique([provider, providerAccountId])
 }
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── Core ──────────────────────────────────────────────────────────
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  REP
+}
+
+model User {
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  emailVerified      DateTime?
+  name               String
+  passwordHash       String
+  image              String?
+  role               UserRole  @default(REP)
+  managerId          String?
+  manager            User?     @relation("ManagerReports", fields: [managerId], references: [id])
+  directReports      User[]    @relation("ManagerReports")
+  salesforceUserId   String?   @unique
+  hibobEmployeeId    String?   @unique
+  salary             Decimal?  @db.Decimal(12, 2)
+  jobTitle           String?
+  department         String?
+  isActive           Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  accounts           Account[]
+  sessions           Session[]
+  targets            Target[]
+  planAssignments    UserPlanAssignment[]
+  commissionEntries  CommissionEntry[]   @relation("CommissionEntryUser")
+  createdEntries     CommissionEntry[]   @relation("CommissionEntryCreator")
+  bonusEntries       BonusEntry[]        @relation("BonusEntryUser")
+  createdBonuses     BonusEntry[]        @relation("BonusEntryCreator")
+  ownedPlacements    Placement[]
+  ownedTimesheets    Timesheet[]
+}
+
+// ─── Commission Plans ──────────────────────────────────────────────
 
 model CommissionPlan {
   id          String   @id @default(cuid())
   name        String
   description String   @default("")
-  // Plan type: "flat_rate" | "tiered" | "accelerator"
-  planType    String   @default("flat_rate")
-  ote         Float    @default(0) // On-Target Earnings (annual)
-  baseSalary  Float    @default(0) // Base salary component
-  quotaAmount Float    @default(0) // Default quota for this plan
-  payFrequency String  @default("monthly") // monthly, quarterly
-  hasRamp     Boolean  @default(false)
+  fiscalYear  String   // e.g. "2026"
+  currency    String   @default("GBP")
+  isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  tiers       PlanTier[]
-  rampSchedule RampPeriod[]
-  users       User[]
-  commissions Commission[]
+  components  PlanComponent[]
+  assignments UserPlanAssignment[]
 }
 
-model PlanTier {
-  id         String @id @default(cuid())
-  planId     String
-  plan       CommissionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
-  minAmount  Float  @default(0)
-  maxAmount  Float? // null = unlimited
-  rate       Float  // percentage as decimal e.g. 0.10 = 10%
-  orderIndex Int    @default(0)
+enum ComponentType {
+  PLACEMENT_PERM
+  PLACEMENT_CONTRACT
+  TIMESHEET
+  BONUS_FLAT
+  KICKER
+  OVERRIDE
 }
 
-model RampPeriod {
-  id         String @id @default(cuid())
-  planId     String
-  plan       CommissionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
-  month      Int    // month number (1, 2, 3, etc.)
-  quotaPct   Float  // quota percentage during ramp e.g. 0.50 = 50%
-  commissionPct Float // commission percentage during ramp e.g. 1.0 = 100%
+model PlanComponent {
+  id              String        @id @default(cuid())
+  commissionPlanId String
+  commissionPlan  CommissionPlan @relation(fields: [commissionPlanId], references: [id], onDelete: Cascade)
+  name            String        // e.g. "Permanent Placements", "Mobileye - Contract Placements"
+  type            ComponentType
+  rate            Decimal       @db.Decimal(10, 6) // e.g. 0.100000 = 10%
+  isPercentage    Boolean       @default(true)     // false = flat GBP amount
+  minValue        Decimal?      @db.Decimal(12, 2) // tier min
+  maxValue        Decimal?      @db.Decimal(12, 2) // tier max
+  tier            Int?          // for ordering tiers
+  accountFilter   String?       // restrict to specific account name
+  kickerThreshold Decimal?      @db.Decimal(12, 2) // KICKER: NFI threshold to activate
+  isActive        Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  commissionEntries CommissionEntry[]
+  userAssignments   UserPlanAssignment[] @relation("AssignedComponents")
 }
 
-model Deal {
-  id          String   @id @default(cuid())
-  name        String
-  amount      Float
-  status      String   @default("open") // open, closed_won, closed_lost
-  closeDate   DateTime?
-  repId       String
-  rep         User     @relation(fields: [repId], references: [id])
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+model UserPlanAssignment {
+  id               String         @id @default(cuid())
+  userId           String
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  commissionPlanId String
+  commissionPlan   CommissionPlan @relation(fields: [commissionPlanId], references: [id], onDelete: Cascade)
+  components       PlanComponent[] @relation("AssignedComponents")
+  startDate        DateTime
+  endDate          DateTime?
+  createdAt        DateTime       @default(now())
 
-  commissions Commission[]
+  @@index([userId, commissionPlanId])
 }
 
-model Commission {
-  id        String   @id @default(cuid())
-  amount    Float
-  status    String   @default("pending") // pending, approved, paid
-  period    String   // e.g. "2024-01" for January 2024
-  dealId    String
-  deal      Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  repId     String
-  rep       User     @relation(fields: [repId], references: [id])
-  planId    String
-  plan      CommissionPlan @relation(fields: [planId], references: [id])
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// ─── Targets ───────────────────────────────────────────────────────
+
+model Target {
+  id                     String   @id @default(cuid())
+  userId                 String
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  period                 String   // YYYY-MM
+  nfiTargetGBP           Decimal  @db.Decimal(12, 2)
+  placementTargetCount   Int?
+  contractRevenueTarget  Decimal? @db.Decimal(12, 2)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@unique([userId, period])
 }
 
-model QuotaTarget {
+// ─── Salesforce Synced Data ────────────────────────────────────────
+
+model SFAccount {
   id           String   @id @default(cuid())
-  repId        String
-  rep          User     @relation(fields: [repId], references: [id], onDelete: Cascade)
-  period       String   // "2024-01" for monthly, "2024-Q1" for quarterly
-  periodType   String   @default("monthly") // monthly, quarterly, annual
-  targetAmount Float
+  salesforceId String   @unique
+  name         String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  @@unique([repId, period])
+  placements   Placement[]
+  timesheets   Timesheet[]
+}
+
+enum PlacementType {
+  PERM
+  CONTRACT
+}
+
+model Placement {
+  id                    String        @id @default(cuid())
+  salesforceId          String        @unique
+  name                  String
+  accountId             String?
+  account               SFAccount?    @relation(fields: [accountId], references: [id])
+  candidateContactId    String?
+  candidateName         String?
+  ownerSalesforceUserId String
+  ownerUserId           String?
+  owner                 User?         @relation(fields: [ownerUserId], references: [id])
+  nfiValue              Decimal       @db.Decimal(12, 2)
+  currency              String        @default("GBP")
+  placedDate            DateTime?
+  invoicedDate          DateTime?
+  paidToAkkar           Boolean       @default(false)
+  commissionPaid        Boolean       @default(false)
+  placementType         PlacementType @default(PERM)
+  isClawback            Boolean       @default(false)
+  clawbackOfId          String?
+  clawbackOf            Placement?    @relation("PlacementClawback", fields: [clawbackOfId], references: [id])
+  clawbacks             Placement[]   @relation("PlacementClawback")
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  lastSyncedAt          DateTime?
+
+  timesheets        Timesheet[]
+  commissionEntries CommissionEntry[]
+}
+
+model Timesheet {
+  id                    String     @id @default(cuid())
+  salesforceId          String     @unique
+  name                  String
+  placementId           String?
+  placement             Placement? @relation(fields: [placementId], references: [id])
+  candidateContactId    String?
+  candidateName         String?
+  accountId             String?
+  account               SFAccount? @relation(fields: [accountId], references: [id])
+  ownerSalesforceUserId String
+  ownerUserId           String?
+  owner                 User?      @relation(fields: [ownerUserId], references: [id])
+  weekEnding            DateTime?
+  grossValue            Decimal    @db.Decimal(12, 2)
+  nfiValue              Decimal    @db.Decimal(12, 2)
+  currency              String     @default("GBP")
+  approved              Boolean    @default(false)
+  paidToAkkar           Boolean    @default(false)
+  commissionPaid        Boolean    @default(false)
+  isClawback            Boolean    @default(false)
+  clawbackOfId          String?
+  clawbackOf            Timesheet? @relation("TimesheetClawback", fields: [clawbackOfId], references: [id])
+  clawbacks             Timesheet[] @relation("TimesheetClawback")
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+  lastSyncedAt          DateTime?
+
+  commissionEntries CommissionEntry[]
+}
+
+// ─── Commission Entries ────────────────────────────────────────────
+
+enum CommissionStatus {
+  PENDING
+  APPROVED
+  PAID
+  HELD
+}
+
+enum SourceType {
+  PLACEMENT
+  TIMESHEET
+}
+
+model CommissionEntry {
+  id                  String           @id @default(cuid())
+  userId              String
+  user                User             @relation("CommissionEntryUser", fields: [userId], references: [id])
+  planComponentId     String?
+  planComponent       PlanComponent?   @relation(fields: [planComponentId], references: [id])
+  sourceType          SourceType
+  sourcePlacementId   String?
+  sourcePlacement     Placement?       @relation(fields: [sourcePlacementId], references: [id])
+  sourceTimesheetId   String?
+  sourceTimesheet     Timesheet?       @relation(fields: [sourceTimesheetId], references: [id])
+  period              String           // YYYY-MM
+  grossValue          Decimal          @db.Decimal(12, 2)
+  commissionAmount    Decimal          @db.Decimal(12, 2)
+  rate                Decimal          @db.Decimal(10, 6)
+  isClawback          Boolean          @default(false)
+  clawbackOfEntryId   String?
+  clawbackOfEntry     CommissionEntry? @relation("EntryClawback", fields: [clawbackOfEntryId], references: [id])
+  clawbackEntries     CommissionEntry[] @relation("EntryClawback")
+  status              CommissionStatus @default(PENDING)
+  isManualOverride    Boolean          @default(false)
+  manualOverrideNote  String?
+  holdReason          String?
+  payoutDate          DateTime?
+  backdatedFromPeriod String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  createdByUserId     String?
+  createdBy           User?            @relation("CommissionEntryCreator", fields: [createdByUserId], references: [id])
+
+  @@index([userId, period])
+  @@index([status])
+  @@index([sourcePlacementId])
+  @@index([sourceTimesheetId])
+}
+
+// ─── Bonus Entries ─────────────────────────────────────────────────
+
+enum BonusType {
+  BONUS
+  OVERRIDE_BONUS
+  DISCRETIONARY
+}
+
+model BonusEntry {
+  id              String           @id @default(cuid())
+  userId          String
+  user            User             @relation("BonusEntryUser", fields: [userId], references: [id])
+  description     String
+  amount          Decimal          @db.Decimal(12, 2)
+  period          String           // YYYY-MM
+  bonusType       BonusType        @default(BONUS)
+  status          CommissionStatus @default(PENDING)
+  isManualEntry   Boolean          @default(true)
+  payoutDate      DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  createdByUserId String?
+  createdBy       User?            @relation("BonusEntryCreator", fields: [createdByUserId], references: [id])
+
+  @@index([userId, period])
+}
+
+// ─── Sync Logging ──────────────────────────────────────────────────
+
+enum SyncType {
+  SALESFORCE_PLACEMENTS
+  SALESFORCE_TIMESHEETS
+  SALESFORCE_ACCOUNTS
+  HIBOB_SALARIES
+}
+
+enum SyncStatus {
+  RUNNING
+  SUCCESS
+  PARTIAL
+  FAILED
+}
+
+model SyncLog {
+  id                String     @id @default(cuid())
+  syncType          SyncType
+  status            SyncStatus @default(RUNNING)
+  recordsProcessed  Int        @default(0)
+  recordsCreated    Int        @default(0)
+  recordsUpdated    Int        @default(0)
+  errorLog          String?    @db.Text
+  triggeredBy       String
+  startedAt         DateTime   @default(now())
+  completedAt       DateTime?
 }

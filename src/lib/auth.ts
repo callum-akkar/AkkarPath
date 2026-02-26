@@ -1,61 +1,98 @@
-import { SignJWT, jwtVerify } from 'jose'
-import { cookies } from 'next/headers'
+import { type NextAuthOptions } from 'next-auth'
+import CredentialsProvider from 'next-auth/providers/credentials'
+import bcrypt from 'bcryptjs'
 import { prisma } from './db'
+import type { UserRole } from '@prisma/client'
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'akkar-commissions-secret'
-)
-
-export interface TokenPayload {
-  userId: string
-  email: string
-  role: string
-}
-
-export async function createToken(payload: TokenPayload): Promise<string> {
-  return new SignJWT(payload as unknown as Record<string, unknown>)
-    .setProtectedHeader({ alg: 'HS256' })
-    .setExpirationTime('7d')
-    .sign(JWT_SECRET)
-}
-
-export async function verifyToken(token: string): Promise<TokenPayload | null> {
-  try {
-    const { payload } = await jwtVerify(token, JWT_SECRET)
-    return payload as unknown as TokenPayload
-  } catch {
-    return null
+declare module 'next-auth' {
+  interface Session {
+    user: {
+      id: string
+      email: string
+      name: string
+      role: UserRole
+      image?: string | null
+    }
+  }
+  interface User {
+    role: UserRole
   }
 }
 
-export async function getCurrentUser() {
-  const cookieStore = await cookies()
-  const token = cookieStore.get('token')?.value
-  if (!token) return null
+declare module 'next-auth/jwt' {
+  interface JWT {
+    id: string
+    role: UserRole
+  }
+}
 
-  const payload = await verifyToken(token)
-  if (!payload) return null
+export const authOptions: NextAuthOptions = {
+  session: { strategy: 'jwt', maxAge: 7 * 24 * 60 * 60 },
+  pages: {
+    signIn: '/login',
+  },
+  providers: [
+    CredentialsProvider({
+      name: 'credentials',
+      credentials: {
+        email: { label: 'Email', type: 'email' },
+        password: { label: 'Password', type: 'password' },
+      },
+      async authorize(credentials) {
+        if (!credentials?.email || !credentials?.password) return null
 
-  const user = await prisma.user.findUnique({
-    where: { id: payload.userId },
-    include: { plan: true },
-  })
+        const user = await prisma.user.findUnique({
+          where: { email: credentials.email },
+        })
 
-  return user
+        if (!user || !user.isActive) return null
+
+        const valid = await bcrypt.compare(credentials.password, user.passwordHash)
+        if (!valid) return null
+
+        return {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          image: user.image,
+        }
+      },
+    }),
+  ],
+  callbacks: {
+    async jwt({ token, user }) {
+      if (user) {
+        token.id = user.id
+        token.role = user.role
+      }
+      return token
+    },
+    async session({ session, token }) {
+      if (token && session.user) {
+        session.user.id = token.id
+        session.user.role = token.role
+      }
+      return session
+    },
+  },
 }
 
 export async function requireAuth() {
-  const user = await getCurrentUser()
-  if (!user) {
-    throw new Error('Unauthorized')
-  }
-  return user
+  const { getServerSession } = await import('next-auth')
+  const session = await getServerSession(authOptions)
+  if (!session?.user) throw new Error('Unauthorized')
+  return session.user
 }
 
 export async function requireAdmin() {
   const user = await requireAuth()
-  if (user.role !== 'admin' && user.role !== 'manager') {
-    throw new Error('Forbidden')
-  }
+  if (user.role !== 'ADMIN') throw new Error('Forbidden')
+  return user
+}
+
+export async function requireManagerOrAdmin() {
+  const user = await requireAuth()
+  if (user.role !== 'ADMIN' && user.role !== 'MANAGER') throw new Error('Forbidden')
   return user
 }

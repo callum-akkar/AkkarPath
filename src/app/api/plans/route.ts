@@ -1,66 +1,65 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getServerSession } from 'next-auth'
+import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
-import { requireAuth, requireAdmin } from '@/lib/auth'
 
 export async function GET() {
   try {
-    await requireAuth()
+    const session = await getServerSession(authOptions)
+    if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    // Only admins can see plans
+    if (session.user.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     const plans = await prisma.commissionPlan.findMany({
       include: {
-        tiers: { orderBy: { orderIndex: 'asc' } },
-        rampSchedule: { orderBy: { month: 'asc' } },
-        _count: { select: { users: true } },
+        components: { orderBy: [{ type: 'asc' }, { tier: 'asc' }] },
+        assignments: {
+          include: {
+            user: { select: { id: true, name: true, email: true } },
+            components: { select: { id: true, name: true } },
+          },
+        },
+        _count: { select: { assignments: true } },
       },
       orderBy: { createdAt: 'desc' },
     })
 
-    return NextResponse.json({ plans })
-  } catch {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    return NextResponse.json(plans)
+  } catch (error) {
+    console.error('Plans GET error:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    await requireAdmin()
-    const { name, description, planType, tiers, ote, baseSalary, quotaAmount, payFrequency, hasRamp, rampSchedule } = await req.json()
+    const session = await getServerSession(authOptions)
+    if (!session?.user || session.user.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
+    const body = await req.json()
+    const { name, description, fiscalYear, currency } = body
+
+    if (!name || !fiscalYear) {
+      return NextResponse.json({ error: 'Name and fiscal year are required' }, { status: 400 })
+    }
 
     const plan = await prisma.commissionPlan.create({
       data: {
         name,
         description: description || '',
-        planType: planType || 'flat_rate',
-        ote: ote ? parseFloat(ote) : 0,
-        baseSalary: baseSalary ? parseFloat(baseSalary) : 0,
-        quotaAmount: quotaAmount ? parseFloat(quotaAmount) : 0,
-        payFrequency: payFrequency || 'monthly',
-        hasRamp: hasRamp || false,
-        tiers: {
-          create: (tiers || []).map((tier: { minAmount: number; maxAmount: number | null; rate: number }, index: number) => ({
-            minAmount: tier.minAmount || 0,
-            maxAmount: tier.maxAmount || null,
-            rate: tier.rate,
-            orderIndex: index,
-          })),
-        },
-        rampSchedule: hasRamp && rampSchedule ? {
-          create: rampSchedule.map((r: { month: number; quotaPct: number; commissionPct: number }) => ({
-            month: r.month,
-            quotaPct: r.quotaPct,
-            commissionPct: r.commissionPct,
-          })),
-        } : undefined,
-      },
-      include: {
-        tiers: { orderBy: { orderIndex: 'asc' } },
-        rampSchedule: { orderBy: { month: 'asc' } },
+        fiscalYear,
+        currency: currency || 'GBP',
       },
     })
 
-    return NextResponse.json({ plan }, { status: 201 })
-  } catch (e) {
-    const message = e instanceof Error ? e.message : 'Server error'
-    return NextResponse.json({ error: message }, { status: 400 })
+    return NextResponse.json(plan, { status: 201 })
+  } catch (error) {
+    console.error('Plan POST error:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

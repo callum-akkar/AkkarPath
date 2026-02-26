@@ -1,14 +1,13 @@
 'use client'
 
 import { useState } from 'react'
+import { signIn } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 
 export default function LoginPage() {
   const router = useRouter()
-  const [isRegister, setIsRegister] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [name, setName] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -18,21 +17,14 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login'
-      const body = isRegister
-        ? { email, password, name }
-        : { email, password }
-
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+      const result = await signIn('credentials', {
+        email,
+        password,
+        redirect: false,
       })
 
-      const data = await res.json()
-
-      if (!res.ok) {
-        setError(data.error || 'Something went wrong')
+      if (result?.error) {
+        setError('Invalid email or password')
         return
       }
 
@@ -53,27 +45,11 @@ export default function LoginPage() {
             A
           </div>
           <h1 className="text-3xl font-bold text-gray-900">Akkar Commissions</h1>
-          <p className="text-gray-500 mt-2">
-            {isRegister ? 'Create your account' : 'Sign in to your account'}
-          </p>
+          <p className="text-gray-500 mt-2">Sign in to your account</p>
         </div>
 
         <div className="card p-8">
           <form onSubmit={handleSubmit} className="space-y-4">
-            {isRegister && (
-              <div>
-                <label className="label">Full Name</label>
-                <input
-                  type="text"
-                  className="input"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                  placeholder="John Smith"
-                />
-              </div>
-            )}
-
             <div>
               <label className="label">Email</label>
               <input
@@ -106,29 +82,14 @@ export default function LoginPage() {
             )}
 
             <button type="submit" className="btn-primary w-full" disabled={loading}>
-              {loading ? 'Please wait...' : isRegister ? 'Create Account' : 'Sign In'}
+              {loading ? 'Signing in...' : 'Sign In'}
             </button>
           </form>
 
-          <div className="mt-6 text-center text-sm text-gray-500">
-            {isRegister ? 'Already have an account?' : "Don't have an account?"}{' '}
-            <button
-              onClick={() => {
-                setIsRegister(!isRegister)
-                setError('')
-              }}
-              className="text-brand-600 font-medium hover:text-brand-700"
-            >
-              {isRegister ? 'Sign in' : 'Register'}
-            </button>
+          <div className="mt-4 p-3 rounded-lg bg-blue-50 text-blue-700 text-xs">
+            <strong>Contact your admin</strong> to get login credentials. Accounts are
+            managed by your administrator.
           </div>
-
-          {!isRegister && (
-            <div className="mt-4 p-3 rounded-lg bg-blue-50 text-blue-700 text-xs">
-              <strong>First user to register becomes admin.</strong> Additional users
-              are reps by default (admins can change roles later).
-            </div>
-          )}
         </div>
       </div>
     </div>

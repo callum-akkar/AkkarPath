@@ -1,367 +1,307 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { useSession } from 'next-auth/react'
 
-interface Commission {
+interface CommissionEntry {
   id: string
-  amount: number
-  status: string
+  userId: string
+  user: { id: string; name: string; email: string }
+  planComponent: { id: string; name: string; type: string } | null
+  sourcePlacement: { id: string; name: string; salesforceId: string; candidateName: string; account?: { name: string } } | null
+  sourceTimesheet: { id: string; name: string; salesforceId: string; candidateName: string; account?: { name: string } } | null
+  sourceType: string
   period: string
-  deal: { id: string; name: string; amount: number }
-  rep: { id: string; name: string; email: string }
-  plan: { id: string; name: string }
+  grossValue: number
+  commissionAmount: number
+  rate: number
+  status: string
+  isClawback: boolean
+  isManualOverride: boolean
+  manualOverrideNote: string | null
+  holdReason: string | null
+  payoutDate: string | null
+  backdatedFromPeriod: string | null
   createdAt: string
 }
 
-interface User {
-  id: string
-  name: string
-  role: string
-}
-
 function formatCurrency(amount: number) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-  }).format(amount)
+  return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', minimumFractionDigits: 2 }).format(amount)
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    pending: 'badge-yellow',
-    approved: 'badge-blue',
-    paid: 'badge-green',
-  }
-  return (
-    <span className={styles[status] || 'badge-gray'}>
-      {status.charAt(0).toUpperCase() + status.slice(1)}
-    </span>
-  )
+function dateToPeriod(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+}
+
+const statusColors: Record<string, string> = {
+  PENDING: 'badge-yellow',
+  APPROVED: 'badge-blue',
+  PAID: 'badge-green',
+  HELD: 'badge-red',
 }
 
 export default function CommissionsPage() {
-  const [commissions, setCommissions] = useState<Commission[]>([])
-  const [users, setUsers] = useState<User[]>([])
-  const [currentUser, setCurrentUser] = useState<User | null>(null)
+  const { data: session } = useSession()
+  const [entries, setEntries] = useState<CommissionEntry[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedPeriod, setSelectedPeriod] = useState('')
-  const [selectedRep, setSelectedRep] = useState('')
+  const [period, setPeriod] = useState(dateToPeriod(new Date()))
+  const [statusFilter, setStatusFilter] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [pagination, setPagination] = useState({ page: 1, total: 0, totalPages: 0 })
 
-  // Generate period
-  const [genRepId, setGenRepId] = useState('')
-  const [genPeriod, setGenPeriod] = useState('')
-  const [showGenerate, setShowGenerate] = useState(false)
+  const isAdmin = session?.user?.role === 'ADMIN'
+  const isManager = session?.user?.role === 'MANAGER'
 
-  const loadCommissions = useCallback(async () => {
-    const params = new URLSearchParams()
-    if (selectedPeriod) params.set('period', selectedPeriod)
-    if (selectedRep) params.set('repId', selectedRep)
+  const loadEntries = useCallback(async () => {
+    setLoading(true)
+    const params = new URLSearchParams({ period, page: String(pagination.page), limit: '50' })
+    if (statusFilter) params.set('status', statusFilter)
 
     const res = await fetch(`/api/commissions?${params}`)
     const data = await res.json()
-    setCommissions(data.commissions || [])
-  }, [selectedPeriod, selectedRep])
-
-  useEffect(() => {
-    Promise.all([
-      fetch('/api/users').then((r) => r.json()),
-      fetch('/api/auth/me').then((r) => r.json()),
-    ]).then(([usersData, meData]) => {
-      setUsers(usersData.users || [])
-      setCurrentUser(meData.user || null)
-      setLoading(false)
-    })
-  }, [])
-
-  useEffect(() => {
-    if (!loading) loadCommissions()
-  }, [loading, loadCommissions])
-
-  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'manager'
-
-  async function handleGenerate(e: React.FormEvent) {
-    e.preventDefault()
-    await fetch('/api/commissions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ repId: genRepId, period: genPeriod }),
-    })
-    setShowGenerate(false)
-    loadCommissions()
-  }
-
-  async function handleBulkUpdate(status: string) {
-    if (selectedIds.size === 0) return
-    await fetch('/api/commissions/bulk', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: Array.from(selectedIds), status }),
-    })
+    setEntries(data.entries || [])
+    setPagination(data.pagination || { page: 1, total: 0, totalPages: 0 })
     setSelectedIds(new Set())
-    loadCommissions()
-  }
+    setLoading(false)
+  }, [period, statusFilter, pagination.page])
 
-  async function handleStatusChange(id: string, status: string) {
-    await fetch(`/api/commissions/${id}`, {
+  useEffect(() => { loadEntries() }, [loadEntries])
+
+  async function handleAction(entryId: string, action: string) {
+    await fetch(`/api/commissions/${entryId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ action }),
     })
-    loadCommissions()
+    loadEntries()
   }
 
-  function toggleSelection(id: string) {
+  async function handleBulkApprove() {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+    await fetch('/api/commissions/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entryIds: ids }),
+    })
+    loadEntries()
+  }
+
+  async function handleBulkPay() {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+    await fetch('/api/commissions/pay', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entryIds: ids }),
+    })
+    loadEntries()
+  }
+
+  function toggleSelect(id: string) {
     const next = new Set(selectedIds)
     if (next.has(id)) next.delete(id)
     else next.add(id)
     setSelectedIds(next)
   }
 
-  function toggleAll() {
-    if (selectedIds.size === commissions.length) {
+  function toggleSelectAll() {
+    if (selectedIds.size === entries.length) {
       setSelectedIds(new Set())
     } else {
-      setSelectedIds(new Set(commissions.map((c) => c.id)))
+      setSelectedIds(new Set(entries.map(e => e.id)))
     }
   }
 
-  // Get unique periods
-  const periods = [...new Set(commissions.map((c) => c.period))].sort().reverse()
-
-  const totalAmount = commissions.reduce((sum, c) => sum + c.amount, 0)
-  const pendingAmount = commissions
-    .filter((c) => c.status === 'pending')
-    .reduce((sum, c) => sum + c.amount, 0)
-  const paidAmount = commissions
-    .filter((c) => c.status === 'paid')
-    .reduce((sum, c) => sum + c.amount, 0)
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">Loading commissions...</div>
-      </div>
-    )
-  }
+  const totalCommission = entries.reduce((sum, e) => sum + Number(e.commissionAmount), 0)
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Commissions</h1>
-          <p className="text-gray-500 text-sm mt-1">
-            Track and manage commission payouts
-          </p>
+          <p className="text-gray-500 text-sm mt-1">Commission entries for {period}</p>
         </div>
-        {isAdmin && (
-          <button
-            onClick={() => {
-              setGenRepId(users[0]?.id || '')
-              const now = new Date()
-              setGenPeriod(
-                `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-              )
-              setShowGenerate(true)
-            }}
-            className="btn-primary"
-          >
-            Generate Commissions
-          </button>
-        )}
-      </div>
-
-      {/* Summary Stats */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
-        <div className="stat-card">
-          <p className="text-sm text-gray-500">Total</p>
-          <p className="text-xl font-bold text-gray-900">{formatCurrency(totalAmount)}</p>
-        </div>
-        <div className="stat-card">
-          <p className="text-sm text-gray-500">Pending</p>
-          <p className="text-xl font-bold text-amber-600">{formatCurrency(pendingAmount)}</p>
-        </div>
-        <div className="stat-card">
-          <p className="text-sm text-gray-500">Paid</p>
-          <p className="text-xl font-bold text-emerald-600">{formatCurrency(paidAmount)}</p>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="flex gap-4 mb-6">
-        <select
-          className="input w-48"
-          value={selectedPeriod}
-          onChange={(e) => setSelectedPeriod(e.target.value)}
-        >
-          <option value="">All Periods</option>
-          {periods.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>
-        {isAdmin && (
+        <div className="flex items-center gap-3">
+          <input
+            type="month"
+            value={period}
+            onChange={(e) => setPeriod(e.target.value)}
+            className="input"
+          />
           <select
-            className="input w-48"
-            value={selectedRep}
-            onChange={(e) => setSelectedRep(e.target.value)}
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="input"
           >
-            <option value="">All Reps</option>
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-              </option>
-            ))}
+            <option value="">All Statuses</option>
+            <option value="PENDING">Pending</option>
+            <option value="APPROVED">Approved</option>
+            <option value="PAID">Paid</option>
+            <option value="HELD">Held</option>
           </select>
-        )}
-        {isAdmin && selectedIds.size > 0 && (
-          <div className="flex gap-2 ml-auto">
-            <button
-              onClick={() => handleBulkUpdate('approved')}
-              className="btn-secondary text-sm"
-            >
-              Approve ({selectedIds.size})
+        </div>
+      </div>
+
+      {/* Summary bar */}
+      <div className="card p-4 mb-6 flex items-center justify-between">
+        <div className="flex gap-6">
+          <div>
+            <span className="text-sm text-gray-500">Total Entries: </span>
+            <span className="font-semibold">{pagination.total}</span>
+          </div>
+          <div>
+            <span className="text-sm text-gray-500">Total Commission: </span>
+            <span className="font-semibold text-brand-600">{formatCurrency(totalCommission)}</span>
+          </div>
+          {selectedIds.size > 0 && (
+            <div>
+              <span className="text-sm text-gray-500">Selected: </span>
+              <span className="font-semibold">{selectedIds.size}</span>
+            </div>
+          )}
+        </div>
+        {(isAdmin || isManager) && selectedIds.size > 0 && (
+          <div className="flex gap-2">
+            <button onClick={handleBulkApprove} className="btn-primary text-sm">
+              Approve Selected
             </button>
-            <button
-              onClick={() => handleBulkUpdate('paid')}
-              className="btn-success text-sm"
-            >
-              Mark Paid ({selectedIds.size})
-            </button>
+            {isAdmin && (
+              <button onClick={handleBulkPay} className="btn-secondary text-sm">
+                Mark as Paid
+              </button>
+            )}
           </div>
         )}
       </div>
 
-      {/* Generate Modal */}
-      {showGenerate && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl">
-            <h2 className="text-lg font-bold mb-4">Generate Commissions</h2>
-            <p className="text-sm text-gray-500 mb-4">
-              Calculate commissions for a rep based on their closed-won deals in the selected period.
-            </p>
-            <form onSubmit={handleGenerate} className="space-y-4">
-              <div>
-                <label className="label">Sales Rep</label>
-                <select
-                  className="input"
-                  value={genRepId}
-                  onChange={(e) => setGenRepId(e.target.value)}
-                  required
+      {loading ? (
+        <div className="flex items-center justify-center h-32">
+          <div className="text-gray-500">Loading...</div>
+        </div>
+      ) : entries.length === 0 ? (
+        <div className="card p-8 text-center text-gray-500">
+          No commission entries found for this period.
+        </div>
+      ) : (
+        <div className="card overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  {(isAdmin || isManager) && (
+                    <th className="table-header w-10">
+                      <input type="checkbox" checked={selectedIds.size === entries.length} onChange={toggleSelectAll} />
+                    </th>
+                  )}
+                  {(isAdmin || isManager) && <th className="table-header">Rep</th>}
+                  <th className="table-header">Source</th>
+                  <th className="table-header">Candidate/Account</th>
+                  <th className="table-header">Component</th>
+                  <th className="table-header text-right">Gross Value</th>
+                  <th className="table-header text-right">Rate</th>
+                  <th className="table-header text-right">Commission</th>
+                  <th className="table-header">Status</th>
+                  <th className="table-header">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.map((entry) => {
+                  const source = entry.sourcePlacement || entry.sourceTimesheet
+                  const accountName = entry.sourcePlacement?.account?.name || entry.sourceTimesheet?.account?.name || ''
+                  return (
+                    <tr key={entry.id} className={`border-b border-gray-50 hover:bg-gray-50 ${entry.isClawback ? 'bg-red-50' : ''}`}>
+                      {(isAdmin || isManager) && (
+                        <td className="table-cell">
+                          <input type="checkbox" checked={selectedIds.has(entry.id)} onChange={() => toggleSelect(entry.id)} />
+                        </td>
+                      )}
+                      {(isAdmin || isManager) && (
+                        <td className="table-cell">
+                          <p className="text-sm font-medium">{entry.user.name}</p>
+                        </td>
+                      )}
+                      <td className="table-cell">
+                        <p className="text-sm font-medium">{source?.name || 'Manual'}</p>
+                        <p className="text-xs text-gray-500">{entry.sourceType}{entry.isClawback ? ' (Clawback)' : ''}</p>
+                      </td>
+                      <td className="table-cell">
+                        <p className="text-sm">{source?.candidateName || '-'}</p>
+                        <p className="text-xs text-gray-500">{accountName}</p>
+                      </td>
+                      <td className="table-cell">
+                        <p className="text-sm">{entry.planComponent?.name || '-'}</p>
+                        <p className="text-xs text-gray-500">{entry.planComponent?.type || ''}</p>
+                      </td>
+                      <td className="table-cell text-right">
+                        <span className={`text-sm ${entry.isClawback ? 'text-red-600' : ''}`}>
+                          {formatCurrency(Number(entry.grossValue))}
+                        </span>
+                      </td>
+                      <td className="table-cell text-right text-sm">
+                        {(Number(entry.rate) * 100).toFixed(1)}%
+                      </td>
+                      <td className="table-cell text-right">
+                        <span className={`text-sm font-semibold ${entry.isClawback ? 'text-red-600' : 'text-brand-600'}`}>
+                          {formatCurrency(Number(entry.commissionAmount))}
+                        </span>
+                      </td>
+                      <td className="table-cell">
+                        <span className={statusColors[entry.status] || 'badge-gray'}>
+                          {entry.status}
+                        </span>
+                        {entry.isManualOverride && (
+                          <span className="badge-gray ml-1" title={entry.manualOverrideNote || ''}>Manual</span>
+                        )}
+                      </td>
+                      <td className="table-cell">
+                        <div className="flex gap-1">
+                          {(isAdmin || isManager) && entry.status === 'PENDING' && (
+                            <button onClick={() => handleAction(entry.id, 'approve')} className="text-xs text-blue-600 hover:text-blue-800">Approve</button>
+                          )}
+                          {isAdmin && entry.status === 'APPROVED' && (
+                            <button onClick={() => handleAction(entry.id, 'pay')} className="text-xs text-emerald-600 hover:text-emerald-800">Pay</button>
+                          )}
+                          {(isAdmin || isManager) && entry.status !== 'PAID' && entry.status !== 'HELD' && (
+                            <button onClick={() => handleAction(entry.id, 'hold')} className="text-xs text-red-600 hover:text-red-800">Hold</button>
+                          )}
+                          {(isAdmin || isManager) && entry.status === 'HELD' && (
+                            <button onClick={() => handleAction(entry.id, 'release')} className="text-xs text-blue-600 hover:text-blue-800">Release</button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {pagination.totalPages > 1 && (
+            <div className="flex items-center justify-between p-4 border-t border-gray-100">
+              <span className="text-sm text-gray-500">
+                Page {pagination.page} of {pagination.totalPages}
+              </span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setPagination(p => ({ ...p, page: p.page - 1 }))}
+                  disabled={pagination.page <= 1}
+                  className="btn-secondary text-sm"
                 >
-                  {users.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="label">Period (YYYY-MM)</label>
-                <input
-                  type="month"
-                  className="input"
-                  value={genPeriod}
-                  onChange={(e) => setGenPeriod(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button type="submit" className="btn-primary flex-1">
-                  Generate
+                  Previous
                 </button>
                 <button
-                  type="button"
-                  onClick={() => setShowGenerate(false)}
-                  className="btn-secondary flex-1"
+                  onClick={() => setPagination(p => ({ ...p, page: p.page + 1 }))}
+                  disabled={pagination.page >= pagination.totalPages}
+                  className="btn-secondary text-sm"
                 >
-                  Cancel
+                  Next
                 </button>
               </div>
-            </form>
-          </div>
+            </div>
+          )}
         </div>
       )}
-
-      {/* Commission Table */}
-      <div className="card overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-gray-50 border-b border-gray-200">
-            <tr>
-              {isAdmin && (
-                <th className="table-header w-10">
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.size === commissions.length && commissions.length > 0}
-                    onChange={toggleAll}
-                    className="rounded border-gray-300"
-                  />
-                </th>
-              )}
-              <th className="table-header">Deal</th>
-              <th className="table-header">Rep</th>
-              <th className="table-header">Plan</th>
-              <th className="table-header">Period</th>
-              <th className="table-header">Deal Value</th>
-              <th className="table-header">Commission</th>
-              <th className="table-header">Status</th>
-              {isAdmin && <th className="table-header"></th>}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {commissions.map((c) => (
-              <tr key={c.id} className="hover:bg-gray-50 transition-colors">
-                {isAdmin && (
-                  <td className="table-cell">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(c.id)}
-                      onChange={() => toggleSelection(c.id)}
-                      className="rounded border-gray-300"
-                    />
-                  </td>
-                )}
-                <td className="table-cell font-medium">{c.deal.name}</td>
-                <td className="table-cell text-gray-600">{c.rep.name}</td>
-                <td className="table-cell text-gray-600">{c.plan.name}</td>
-                <td className="table-cell text-gray-600">{c.period}</td>
-                <td className="table-cell">{formatCurrency(c.deal.amount)}</td>
-                <td className="table-cell font-semibold text-brand-600">
-                  {formatCurrency(c.amount)}
-                </td>
-                <td className="table-cell">
-                  <StatusBadge status={c.status} />
-                </td>
-                {isAdmin && (
-                  <td className="table-cell text-right">
-                    <select
-                      value={c.status}
-                      onChange={(e) => handleStatusChange(c.id, e.target.value)}
-                      className="text-sm border border-gray-200 rounded-md px-2 py-1"
-                    >
-                      <option value="pending">Pending</option>
-                      <option value="approved">Approved</option>
-                      <option value="paid">Paid</option>
-                    </select>
-                  </td>
-                )}
-              </tr>
-            ))}
-            {commissions.length === 0 && (
-              <tr>
-                <td
-                  colSpan={isAdmin ? 9 : 7}
-                  className="table-cell text-center text-gray-500 py-12"
-                >
-                  No commissions found. Generate commissions from closed-won deals.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
     </div>
   )
 }

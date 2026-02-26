@@ -31,9 +31,9 @@ interface DashboardData {
 }
 
 function formatCurrency(amount: number) {
-  return new Intl.NumberFormat('en-US', {
+  return new Intl.NumberFormat('en-GB', {
     style: 'currency',
-    currency: 'USD',
+    currency: 'GBP',
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(amount)
@@ -66,9 +66,9 @@ export default function DashboardPage() {
 
   const stats = [
     {
-      label: 'Total Revenue',
+      label: 'Total NFI',
       value: formatCurrency(data.totalRevenue),
-      sub: `${data.closedWonDeals} closed deals`,
+      sub: `${data.closedWonDeals} placements invoiced`,
       color: 'text-emerald-600',
       bg: 'bg-emerald-50',
       dotColor: 'bg-emerald-600',
@@ -84,7 +84,7 @@ export default function DashboardPage() {
     {
       label: 'Pipeline',
       value: formatCurrency(data.pipelineValue),
-      sub: `${data.openDeals} open deals`,
+      sub: `${data.openDeals} open placements`,
       color: 'text-amber-600',
       bg: 'bg-amber-50',
       dotColor: 'bg-amber-600',
@@ -106,19 +106,14 @@ export default function DashboardPage() {
     <div>
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-gray-500 text-sm mt-1">
-          Overview for {data.currentPeriod}
-        </p>
+        <p className="text-gray-500 text-sm mt-1">Overview for {data.currentPeriod}</p>
       </div>
 
-      {/* Quota Attainment Banner */}
       {data.currentQuota > 0 && (
         <div className="card p-6 mb-6">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <h3 className="font-semibold text-gray-900">
-                Monthly Quota Attainment
-              </h3>
+              <h3 className="font-semibold text-gray-900">Monthly Target Attainment</h3>
               <p className="text-sm text-gray-500">
                 {formatCurrency(data.currentRevenue)} of {formatCurrency(data.currentQuota)} target
               </p>
@@ -138,16 +133,9 @@ export default function DashboardPage() {
               style={{ width: `${Math.min(data.attainmentPct * 100, 100)}%` }}
             />
           </div>
-          <div className="flex justify-between mt-2 text-xs text-gray-400">
-            <span>0%</span>
-            <span>50%</span>
-            <span>75%</span>
-            <span className="font-semibold text-emerald-600">100%</span>
-          </div>
         </div>
       )}
 
-      {/* Stat Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         {stats.map((stat) => (
           <div key={stat.label} className="stat-card">
@@ -163,44 +151,32 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 card p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">
-            Revenue vs Quota
-          </h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">NFI vs Target</h3>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={data.monthlyData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+                <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `£${(v / 1000).toFixed(0)}k`} />
                 <Tooltip
                   formatter={(value: number, name: string) => [
                     formatCurrency(value),
-                    name === 'quota' ? 'Quota Target' : name === 'revenue' ? 'Revenue' : 'Commissions',
+                    name === 'quota' ? 'Target' : name === 'revenue' ? 'NFI' : 'Commissions',
                   ]}
-                  labelStyle={{ fontWeight: 'bold' }}
                 />
                 <Legend />
                 <Bar dataKey="revenue" name="revenue" fill="#10b981" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="commissions" name="commissions" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                <Line
-                  type="monotone"
-                  dataKey="quota"
-                  name="quota"
-                  stroke="#ef4444"
-                  strokeWidth={2}
-                  strokeDasharray="5 5"
-                  dot={{ r: 3 }}
-                />
+                <Line type="monotone" dataKey="quota" name="quota" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
         </div>
 
         <div className="card p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Top Reps</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Top Performers</h3>
           <div className="space-y-4">
             {data.topReps.map((rep, idx) => (
               <div key={rep.name}>
@@ -213,15 +189,7 @@ export default function DashboardPage() {
                     <p className="text-xs text-gray-500">{formatCurrency(rep.total)} earned</p>
                   </div>
                   {rep.attainment > 0 && (
-                    <span
-                      className={`text-xs font-semibold ${
-                        rep.attainment >= 1
-                          ? 'text-emerald-600'
-                          : rep.attainment >= 0.75
-                          ? 'text-amber-600'
-                          : 'text-red-500'
-                      }`}
-                    >
+                    <span className={`text-xs font-semibold ${rep.attainment >= 1 ? 'text-emerald-600' : rep.attainment >= 0.75 ? 'text-amber-600' : 'text-red-500'}`}>
                       {formatPct(rep.attainment)}
                     </span>
                   )}
@@ -229,13 +197,7 @@ export default function DashboardPage() {
                 {rep.attainment > 0 && (
                   <div className="ml-11 h-1.5 bg-gray-100 rounded-full overflow-hidden">
                     <div
-                      className={`h-full rounded-full ${
-                        rep.attainment >= 1
-                          ? 'bg-emerald-500'
-                          : rep.attainment >= 0.75
-                          ? 'bg-amber-500'
-                          : 'bg-red-400'
-                      }`}
+                      className={`h-full rounded-full ${rep.attainment >= 1 ? 'bg-emerald-500' : rep.attainment >= 0.75 ? 'bg-amber-500' : 'bg-red-400'}`}
                       style={{ width: `${Math.min(rep.attainment * 100, 100)}%` }}
                     />
                   </div>

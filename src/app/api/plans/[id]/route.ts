@@ -1,79 +1,87 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getServerSession } from 'next-auth'
+import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
-import { requireAdmin } from '@/lib/auth'
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
-    await requireAdmin()
+    const session = await getServerSession(authOptions)
+    if (!session?.user || session.user.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
     const { id } = await params
-    const { name, description, planType, tiers, ote, baseSalary, quotaAmount, payFrequency, hasRamp, rampSchedule } = await req.json()
-
-    const updateData: Record<string, unknown> = {}
-    if (name !== undefined) updateData.name = name
-    if (description !== undefined) updateData.description = description
-    if (planType !== undefined) updateData.planType = planType
-    if (ote !== undefined) updateData.ote = parseFloat(ote)
-    if (baseSalary !== undefined) updateData.baseSalary = parseFloat(baseSalary)
-    if (quotaAmount !== undefined) updateData.quotaAmount = parseFloat(quotaAmount)
-    if (payFrequency !== undefined) updateData.payFrequency = payFrequency
-    if (hasRamp !== undefined) updateData.hasRamp = hasRamp
-
-    await prisma.commissionPlan.update({
-      where: { id },
-      data: updateData,
-    })
-
-    if (tiers) {
-      await prisma.planTier.deleteMany({ where: { planId: id } })
-      await prisma.planTier.createMany({
-        data: tiers.map((tier: { minAmount: number; maxAmount: number | null; rate: number }, index: number) => ({
-          planId: id,
-          minAmount: tier.minAmount || 0,
-          maxAmount: tier.maxAmount || null,
-          rate: tier.rate,
-          orderIndex: index,
-        })),
-      })
-    }
-
-    if (rampSchedule !== undefined) {
-      await prisma.rampPeriod.deleteMany({ where: { planId: id } })
-      if (rampSchedule && rampSchedule.length > 0) {
-        await prisma.rampPeriod.createMany({
-          data: rampSchedule.map((r: { month: number; quotaPct: number; commissionPct: number }) => ({
-            planId: id,
-            month: r.month,
-            quotaPct: r.quotaPct,
-            commissionPct: r.commissionPct,
-          })),
-        })
-      }
-    }
-
-    const updated = await prisma.commissionPlan.findUnique({
+    const plan = await prisma.commissionPlan.findUnique({
       where: { id },
       include: {
-        tiers: { orderBy: { orderIndex: 'asc' } },
-        rampSchedule: { orderBy: { month: 'asc' } },
-        _count: { select: { users: true } },
+        components: { orderBy: [{ type: 'asc' }, { tier: 'asc' }] },
+        assignments: {
+          include: {
+            user: { select: { id: true, name: true, email: true } },
+            components: { select: { id: true, name: true } },
+          },
+        },
       },
     })
 
-    return NextResponse.json({ plan: updated })
-  } catch (e) {
-    const message = e instanceof Error ? e.message : 'Server error'
-    return NextResponse.json({ error: message }, { status: 400 })
+    if (!plan) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    return NextResponse.json(plan)
+  } catch (error) {
+    console.error('Plan GET error:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
-    await requireAdmin()
-    const { id } = await params
+    const session = await getServerSession(authOptions)
+    if (!session?.user || session.user.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
+    const { id } = await params
+    const body = await req.json()
+    const { name, description, fiscalYear, currency, isActive } = body
+
+    const plan = await prisma.commissionPlan.update({
+      where: { id },
+      data: {
+        ...(name !== undefined && { name }),
+        ...(description !== undefined && { description }),
+        ...(fiscalYear !== undefined && { fiscalYear }),
+        ...(currency !== undefined && { currency }),
+        ...(isActive !== undefined && { isActive }),
+      },
+    })
+
+    return NextResponse.json(plan)
+  } catch (error) {
+    console.error('Plan PUT error:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const session = await getServerSession(authOptions)
+    if (!session?.user || session.user.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
+    const { id } = await params
     await prisma.commissionPlan.delete({ where: { id } })
-    return NextResponse.json({ success: true })
-  } catch {
-    return NextResponse.json({ error: 'Error deleting plan' }, { status: 400 })
+    return NextResponse.json({ deleted: true })
+  } catch (error) {
+    console.error('Plan DELETE error:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

@@ -1,140 +1,64 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
+import { useSession } from 'next-auth/react'
 
-interface Plan {
-  id: string
-  name: string
-}
-
-interface UserData {
+interface TeamMember {
   id: string
   name: string
   email: string
   role: string
-  planId: string | null
-  plan: Plan | null
-  createdAt: string
-  _count: { deals: number; commissions: number }
+  isActive: boolean
+  jobTitle: string | null
+  manager: { id: string; name: string } | null
+  _count: { directReports: number; planAssignments: number }
 }
 
-function RoleBadge({ role }: { role: string }) {
-  const styles: Record<string, string> = {
-    admin: 'badge-blue',
-    manager: 'badge-green',
-    rep: 'badge-gray',
-  }
-  return (
-    <span className={styles[role] || 'badge-gray'}>
-      {role.charAt(0).toUpperCase() + role.slice(1)}
-    </span>
-  )
+interface MemberCommissions {
+  entries: Array<{
+    id: string
+    commissionAmount: number
+    grossValue: number
+    status: string
+    sourceType: string
+    planComponent: { name: string; type: string } | null
+  }>
+}
+
+function formatCurrency(amount: number) {
+  return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', minimumFractionDigits: 0 }).format(amount)
+}
+
+function dateToPeriod(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 }
 
 export default function TeamPage() {
-  const [users, setUsers] = useState<UserData[]>([])
-  const [plans, setPlans] = useState<Plan[]>([])
+  const { data: session } = useSession()
+  const [members, setMembers] = useState<TeamMember[]>([])
   const [loading, setLoading] = useState(true)
-  const [showForm, setShowForm] = useState(false)
-  const [editingUser, setEditingUser] = useState<UserData | null>(null)
-
-  // Form state
-  const [formName, setFormName] = useState('')
-  const [formEmail, setFormEmail] = useState('')
-  const [formPassword, setFormPassword] = useState('')
-  const [formRole, setFormRole] = useState('rep')
-  const [formPlanId, setFormPlanId] = useState('')
-
-  const loadData = useCallback(async () => {
-    const [usersRes, plansRes] = await Promise.all([
-      fetch('/api/users'),
-      fetch('/api/plans'),
-    ])
-    const usersData = await usersRes.json()
-    const plansData = await plansRes.json()
-    setUsers(usersData.users || [])
-    setPlans(plansData.plans || [])
-    setLoading(false)
-  }, [])
+  const [selectedMember, setSelectedMember] = useState<string | null>(null)
+  const [memberCommissions, setMemberCommissions] = useState<MemberCommissions | null>(null)
+  const [period, setPeriod] = useState(dateToPeriod(new Date()))
 
   useEffect(() => {
-    loadData()
-  }, [loadData])
+    fetch('/api/users')
+      .then(res => res.json())
+      .then(data => setMembers(Array.isArray(data) ? data : []))
+      .finally(() => setLoading(false))
+  }, [])
 
-  function openNewForm() {
-    setEditingUser(null)
-    setFormName('')
-    setFormEmail('')
-    setFormPassword('')
-    setFormRole('rep')
-    setFormPlanId('')
-    setShowForm(true)
+  async function loadMemberCommissions(userId: string) {
+    setSelectedMember(userId)
+    const res = await fetch(`/api/commissions?userId=${userId}&period=${period}`)
+    const data = await res.json()
+    setMemberCommissions(data)
   }
 
-  function openEditForm(user: UserData) {
-    setEditingUser(user)
-    setFormName(user.name)
-    setFormEmail(user.email)
-    setFormPassword('')
-    setFormRole(user.role)
-    setFormPlanId(user.planId || '')
-    setShowForm(true)
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-
-    if (editingUser) {
-      const payload: Record<string, string> = {
-        name: formName,
-        email: formEmail,
-        role: formRole,
-        planId: formPlanId,
-      }
-      await fetch(`/api/users/${editingUser.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-    } else {
-      await fetch('/api/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: formName,
-          email: formEmail,
-          password: formPassword,
-          role: formRole,
-          planId: formPlanId || null,
-        }),
-      })
-    }
-
-    setShowForm(false)
-    loadData()
-  }
-
-  async function handleDelete(id: string) {
-    if (!confirm('Remove this team member?')) return
-    await fetch(`/api/users/${id}`, { method: 'DELETE' })
-    loadData()
-  }
-
-  async function handleAssignPlan(userId: string, planId: string) {
-    await fetch(`/api/users/${userId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ planId: planId || null }),
-    })
-    loadData()
-  }
+  const isAdmin = session?.user?.role === 'ADMIN'
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">Loading team...</div>
-      </div>
-    )
+    return <div className="flex items-center justify-center h-64"><div className="text-gray-500">Loading team...</div></div>
   }
 
   return (
@@ -142,167 +66,114 @@ export default function TeamPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Team</h1>
-          <p className="text-gray-500 text-sm mt-1">
-            Manage team members and assign commission plans
-          </p>
+          <p className="text-gray-500 text-sm mt-1">{members.length} team members</p>
         </div>
-        <button onClick={openNewForm} className="btn-primary">
-          + Add Member
-        </button>
+        <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className="input" />
       </div>
 
-      {/* Form Modal */}
-      {showForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl">
-            <h2 className="text-lg font-bold mb-4">
-              {editingUser ? 'Edit Member' : 'Add Team Member'}
-            </h2>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="label">Full Name</label>
-                <input
-                  className="input"
-                  value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
-                  required
-                  placeholder="Jane Smith"
-                />
-              </div>
-              <div>
-                <label className="label">Email</label>
-                <input
-                  type="email"
-                  className="input"
-                  value={formEmail}
-                  onChange={(e) => setFormEmail(e.target.value)}
-                  required
-                  placeholder="jane@akkar.com"
-                />
-              </div>
-              {!editingUser && (
-                <div>
-                  <label className="label">Password</label>
-                  <input
-                    type="password"
-                    className="input"
-                    value={formPassword}
-                    onChange={(e) => setFormPassword(e.target.value)}
-                    required
-                    minLength={6}
-                    placeholder="Min 6 characters"
-                  />
-                </div>
-              )}
-              <div>
-                <label className="label">Role</label>
-                <select
-                  className="input"
-                  value={formRole}
-                  onChange={(e) => setFormRole(e.target.value)}
-                >
-                  <option value="rep">Sales Rep</option>
-                  <option value="manager">Manager</option>
-                  <option value="admin">Admin</option>
-                </select>
-              </div>
-              <div>
-                <label className="label">Commission Plan</label>
-                <select
-                  className="input"
-                  value={formPlanId}
-                  onChange={(e) => setFormPlanId(e.target.value)}
-                >
-                  <option value="">No plan assigned</option>
-                  {plans.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button type="submit" className="btn-primary flex-1">
-                  {editingUser ? 'Update' : 'Add Member'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="btn-secondary flex-1"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">
+          <div className="card overflow-hidden">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  <th className="table-header">Name</th>
+                  <th className="table-header">Role</th>
+                  <th className="table-header">Title</th>
+                  <th className="table-header">Manager</th>
+                  <th className="table-header">Plans</th>
+                  <th className="table-header">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {members.map(member => (
+                  <tr
+                    key={member.id}
+                    className={`border-b border-gray-50 hover:bg-gray-50 cursor-pointer ${selectedMember === member.id ? 'bg-brand-50' : ''}`}
+                    onClick={() => loadMemberCommissions(member.id)}
+                  >
+                    <td className="table-cell">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-sm font-medium">
+                          {member.name.charAt(0)}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">{member.name}</p>
+                          <p className="text-xs text-gray-500">{member.email}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="table-cell">
+                      <span className={`text-xs font-medium ${member.role === 'ADMIN' ? 'text-purple-600' : member.role === 'MANAGER' ? 'text-blue-600' : 'text-gray-600'}`}>
+                        {member.role}
+                      </span>
+                    </td>
+                    <td className="table-cell text-sm text-gray-600">{member.jobTitle || '-'}</td>
+                    <td className="table-cell text-sm text-gray-600">{member.manager?.name || '-'}</td>
+                    <td className="table-cell text-sm">{member._count.planAssignments}</td>
+                    <td className="table-cell">
+                      <span className={member.isActive ? 'badge-green' : 'badge-red'}>
+                        {member.isActive ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
-      )}
 
-      {/* Team Table */}
-      <div className="card overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-gray-50 border-b border-gray-200">
-            <tr>
-              <th className="table-header">Name</th>
-              <th className="table-header">Email</th>
-              <th className="table-header">Role</th>
-              <th className="table-header">Commission Plan</th>
-              <th className="table-header">Deals</th>
-              <th className="table-header">Commissions</th>
-              <th className="table-header"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {users.map((u) => (
-              <tr key={u.id} className="hover:bg-gray-50 transition-colors">
-                <td className="table-cell">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-sm font-medium">
-                      {u.name.charAt(0).toUpperCase()}
+        <div>
+          {selectedMember && memberCommissions ? (
+            <div className="card p-6">
+              <h3 className="font-semibold text-gray-900 mb-4">
+                Commissions for {period}
+              </h3>
+              {memberCommissions.entries.length === 0 ? (
+                <p className="text-sm text-gray-500">No entries for this period.</p>
+              ) : (
+                <div className="space-y-3">
+                  <div className="p-3 bg-brand-50 rounded-lg">
+                    <p className="text-xs text-gray-500">Total Commission</p>
+                    <p className="text-lg font-bold text-brand-600">
+                      {formatCurrency(memberCommissions.entries.reduce((s, e) => s + Number(e.commissionAmount), 0))}
+                    </p>
+                  </div>
+                  {memberCommissions.entries.map(entry => (
+                    <div key={entry.id} className="flex items-center justify-between p-2 rounded hover:bg-gray-50">
+                      <div>
+                        <p className="text-sm font-medium">{entry.planComponent?.name || 'Manual'}</p>
+                        <p className="text-xs text-gray-500">{entry.sourceType} - {entry.status}</p>
+                      </div>
+                      <span className="text-sm font-semibold">{formatCurrency(Number(entry.commissionAmount))}</span>
                     </div>
-                    <span className="font-medium">{u.name}</span>
-                  </div>
-                </td>
-                <td className="table-cell text-gray-600">{u.email}</td>
-                <td className="table-cell">
-                  <RoleBadge role={u.role} />
-                </td>
-                <td className="table-cell">
-                  <select
-                    value={u.planId || ''}
-                    onChange={(e) => handleAssignPlan(u.id, e.target.value)}
-                    className="text-sm border border-gray-200 rounded-md px-2 py-1"
-                  >
-                    <option value="">No plan</option>
-                    {plans.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td className="table-cell text-gray-600">{u._count.deals}</td>
-                <td className="table-cell text-gray-600">{u._count.commissions}</td>
-                <td className="table-cell text-right">
-                  <div className="flex gap-2 justify-end">
-                    <button
-                      onClick={() => openEditForm(u)}
-                      className="text-brand-600 hover:text-brand-800 text-sm font-medium"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleDelete(u.id)}
-                      className="text-red-600 hover:text-red-800 text-sm font-medium"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="card p-6 text-center text-gray-500">
+              <p className="text-sm">Click a team member to view their commissions</p>
+            </div>
+          )}
+
+          {isAdmin && (
+            <div className="card p-6 mt-4">
+              <h3 className="font-semibold text-gray-900 mb-2">Quick Actions</h3>
+              <div className="space-y-2">
+                <a href="/dashboard/admin" className="block text-sm text-brand-600 hover:text-brand-700">
+                  Manage Users &rarr;
+                </a>
+                <a href="/dashboard/plans" className="block text-sm text-brand-600 hover:text-brand-700">
+                  Manage Plans &rarr;
+                </a>
+                <a href="/dashboard/targets" className="block text-sm text-brand-600 hover:text-brand-700">
+                  Manage Targets &rarr;
+                </a>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

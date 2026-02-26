@@ -2,186 +2,135 @@
 
 import { useEffect, useState, useCallback } from 'react'
 
-interface Tier {
-  id?: string
-  minAmount: number
-  maxAmount: number | null
+interface PlanComponent {
+  id: string
+  name: string
+  type: string
   rate: number
-  orderIndex: number
+  isPercentage: boolean
+  minValue: number | null
+  maxValue: number | null
+  tier: number | null
+  accountFilter: string | null
+  kickerThreshold: number | null
+  isActive: boolean
+}
+
+interface Assignment {
+  id: string
+  user: { id: string; name: string; email: string }
+  components: { id: string; name: string }[]
+  startDate: string
+  endDate: string | null
 }
 
 interface Plan {
   id: string
   name: string
   description: string
-  planType: string
-  ote: number
-  baseSalary: number
-  quotaAmount: number
-  payFrequency: string
-  hasRamp: boolean
-  tiers: Tier[]
-  rampSchedule: { month: number; quotaPct: number; commissionPct: number }[]
-  _count: { users: number }
-  createdAt: string
+  fiscalYear: string
+  currency: string
+  isActive: boolean
+  components: PlanComponent[]
+  assignments: Assignment[]
+  _count: { assignments: number }
 }
 
-function formatPercent(rate: number) {
-  return `${(rate * 100).toFixed(1)}%`
-}
-
-function formatCurrency(amount: number) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-  }).format(amount)
-}
-
-const planTypeLabels: Record<string, string> = {
-  flat_rate: 'Flat Rate',
-  tiered: 'Tiered',
-  accelerator: 'Accelerator',
-}
+const componentTypes = [
+  { value: 'PLACEMENT_PERM', label: 'Permanent Placements' },
+  { value: 'PLACEMENT_CONTRACT', label: 'Contract Placements' },
+  { value: 'TIMESHEET', label: 'Timesheets' },
+  { value: 'BONUS_FLAT', label: 'Flat Bonus' },
+  { value: 'KICKER', label: 'Kicker' },
+  { value: 'OVERRIDE', label: 'Manager Override' },
+]
 
 export default function PlansPage() {
   const [plans, setPlans] = useState<Plan[]>([])
   const [loading, setLoading] = useState(true)
-  const [showForm, setShowForm] = useState(false)
-  const [editingPlan, setEditingPlan] = useState<Plan | null>(null)
+  const [selectedPlan, setSelectedPlan] = useState<string | null>(null)
+  const [showCreatePlan, setShowCreatePlan] = useState(false)
+  const [showAddComponent, setShowAddComponent] = useState(false)
+  const [showAssign, setShowAssign] = useState(false)
+  const [users, setUsers] = useState<{ id: string; name: string; email: string }[]>([])
 
-  // Form state
-  const [formName, setFormName] = useState('')
-  const [formDescription, setFormDescription] = useState('')
-  const [formPlanType, setFormPlanType] = useState('flat_rate')
-  const [formOte, setFormOte] = useState('')
-  const [formBaseSalary, setFormBaseSalary] = useState('')
-  const [formQuotaAmount, setFormQuotaAmount] = useState('')
-  const [formPayFrequency, setFormPayFrequency] = useState('monthly')
-  const [formTiers, setFormTiers] = useState<Tier[]>([
-    { minAmount: 0, maxAmount: null, rate: 0.1, orderIndex: 0 },
-  ])
+  // Form states
+  const [planForm, setPlanForm] = useState({ name: '', description: '', fiscalYear: String(new Date().getFullYear()), currency: 'GBP' })
+  const [compForm, setCompForm] = useState({ name: '', type: 'PLACEMENT_PERM', rate: '', isPercentage: true, minValue: '', maxValue: '', tier: '', accountFilter: '', kickerThreshold: '' })
+  const [assignForm, setAssignForm] = useState({ userId: '', startDate: '', endDate: '' })
 
   const loadPlans = useCallback(async () => {
+    setLoading(true)
     const res = await fetch('/api/plans')
     const data = await res.json()
-    setPlans(data.plans || [])
+    setPlans(Array.isArray(data) ? data : [])
     setLoading(false)
   }, [])
 
+  useEffect(() => { loadPlans() }, [loadPlans])
+
   useEffect(() => {
-    loadPlans()
-  }, [loadPlans])
+    fetch('/api/users').then(r => r.json()).then(d => setUsers(Array.isArray(d) ? d : []))
+  }, [])
 
-  function openNewForm() {
-    setEditingPlan(null)
-    setFormName('')
-    setFormDescription('')
-    setFormPlanType('flat_rate')
-    setFormOte('')
-    setFormBaseSalary('')
-    setFormQuotaAmount('')
-    setFormPayFrequency('monthly')
-    setFormTiers([{ minAmount: 0, maxAmount: null, rate: 0.1, orderIndex: 0 }])
-    setShowForm(true)
-  }
+  const plan = plans.find(p => p.id === selectedPlan)
 
-  function openEditForm(plan: Plan) {
-    setEditingPlan(plan)
-    setFormName(plan.name)
-    setFormDescription(plan.description)
-    setFormPlanType(plan.planType)
-    setFormOte(plan.ote ? plan.ote.toString() : '')
-    setFormBaseSalary(plan.baseSalary ? plan.baseSalary.toString() : '')
-    setFormQuotaAmount(plan.quotaAmount ? plan.quotaAmount.toString() : '')
-    setFormPayFrequency(plan.payFrequency)
-    setFormTiers(
-      plan.tiers.length > 0
-        ? plan.tiers.map((t) => ({ ...t }))
-        : [{ minAmount: 0, maxAmount: null, rate: 0.1, orderIndex: 0 }]
-    )
-    setShowForm(true)
-  }
-
-  function addTier() {
-    const lastTier = formTiers[formTiers.length - 1]
-    setFormTiers([
-      ...formTiers,
-      {
-        minAmount: lastTier?.maxAmount || 0,
-        maxAmount: null,
-        rate: (lastTier?.rate || 0.1) + 0.05,
-        orderIndex: formTiers.length,
-      },
-    ])
-  }
-
-  function removeTier(index: number) {
-    if (formTiers.length <= 1) return
-    setFormTiers(formTiers.filter((_, i) => i !== index))
-  }
-
-  function updateTier(index: number, field: keyof Tier, value: string) {
-    const updated = [...formTiers]
-    if (field === 'rate') {
-      updated[index].rate = parseFloat(value) / 100
-    } else if (field === 'minAmount') {
-      updated[index].minAmount = parseFloat(value) || 0
-    } else if (field === 'maxAmount') {
-      updated[index].maxAmount = value ? parseFloat(value) : null
-    }
-    setFormTiers(updated)
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-
-    const payload = {
-      name: formName,
-      description: formDescription,
-      planType: formPlanType,
-      ote: formOte,
-      baseSalary: formBaseSalary,
-      quotaAmount: formQuotaAmount,
-      payFrequency: formPayFrequency,
-      tiers: formTiers.map((t, i) => ({
-        minAmount: t.minAmount,
-        maxAmount: t.maxAmount,
-        rate: t.rate,
-        orderIndex: i,
-      })),
-    }
-
-    if (editingPlan) {
-      await fetch(`/api/plans/${editingPlan.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-    } else {
-      await fetch('/api/plans', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-    }
-
-    setShowForm(false)
+  async function createPlan() {
+    await fetch('/api/plans', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(planForm),
+    })
+    setShowCreatePlan(false)
+    setPlanForm({ name: '', description: '', fiscalYear: String(new Date().getFullYear()), currency: 'GBP' })
     loadPlans()
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm('Delete this commission plan?')) return
+  async function addComponent() {
+    if (!selectedPlan) return
+    await fetch(`/api/plans/${selectedPlan}/components`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...compForm,
+        rate: compForm.rate,
+        minValue: compForm.minValue || undefined,
+        maxValue: compForm.maxValue || undefined,
+        tier: compForm.tier || undefined,
+        accountFilter: compForm.accountFilter || undefined,
+        kickerThreshold: compForm.kickerThreshold || undefined,
+      }),
+    })
+    setShowAddComponent(false)
+    setCompForm({ name: '', type: 'PLACEMENT_PERM', rate: '', isPercentage: true, minValue: '', maxValue: '', tier: '', accountFilter: '', kickerThreshold: '' })
+    loadPlans()
+  }
+
+  async function assignPlan() {
+    if (!selectedPlan) return
+    await fetch(`/api/plans/${selectedPlan}/assign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: assignForm.userId,
+        startDate: assignForm.startDate,
+        endDate: assignForm.endDate || undefined,
+      }),
+    })
+    setShowAssign(false)
+    setAssignForm({ userId: '', startDate: '', endDate: '' })
+    loadPlans()
+  }
+
+  async function deletePlan(id: string) {
+    if (!confirm('Delete this plan? This cannot be undone.')) return
     await fetch(`/api/plans/${id}`, { method: 'DELETE' })
+    setSelectedPlan(null)
     loadPlans()
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">Loading plans...</div>
-      </div>
-    )
+    return <div className="flex items-center justify-center h-64"><div className="text-gray-500">Loading plans...</div></div>
   }
 
   return (
@@ -189,299 +138,211 @@ export default function PlansPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Commission Plans</h1>
-          <p className="text-gray-500 text-sm mt-1">
-            Create and manage compensation structures
-          </p>
+          <p className="text-gray-500 text-sm mt-1">{plans.length} plans configured</p>
         </div>
-        <button onClick={openNewForm} className="btn-primary">
-          + New Plan
-        </button>
+        <button onClick={() => setShowCreatePlan(true)} className="btn-primary">New Plan</button>
       </div>
 
-      {/* Plan Form Modal */}
-      {showForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-auto py-8">
-          <div className="bg-white rounded-xl p-6 w-full max-w-lg shadow-xl max-h-[90vh] overflow-y-auto">
-            <h2 className="text-lg font-bold mb-4">
-              {editingPlan ? 'Edit Plan' : 'New Commission Plan'}
-            </h2>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="label">Plan Name</label>
-                <input
-                  className="input"
-                  value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
-                  placeholder="Standard Sales Commission"
-                  required
-                />
-              </div>
-              <div>
-                <label className="label">Description</label>
-                <textarea
-                  className="input"
-                  value={formDescription}
-                  onChange={(e) => setFormDescription(e.target.value)}
-                  placeholder="Commission plan for the sales team..."
-                  rows={2}
-                />
-              </div>
-
-              {/* Compensation Structure */}
-              <div className="border-t pt-4">
-                <h3 className="text-sm font-semibold text-gray-700 mb-3">Compensation Structure</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="label">OTE (Annual)</label>
-                    <input
-                      type="number"
-                      className="input"
-                      value={formOte}
-                      onChange={(e) => setFormOte(e.target.value)}
-                      placeholder="150000"
-                    />
-                  </div>
-                  <div>
-                    <label className="label">Base Salary</label>
-                    <input
-                      type="number"
-                      className="input"
-                      value={formBaseSalary}
-                      onChange={(e) => setFormBaseSalary(e.target.value)}
-                      placeholder="75000"
-                    />
-                  </div>
-                  <div>
-                    <label className="label">Annual Quota</label>
-                    <input
-                      type="number"
-                      className="input"
-                      value={formQuotaAmount}
-                      onChange={(e) => setFormQuotaAmount(e.target.value)}
-                      placeholder="600000"
-                    />
-                  </div>
-                  <div>
-                    <label className="label">Pay Frequency</label>
-                    <select
-                      className="input"
-                      value={formPayFrequency}
-                      onChange={(e) => setFormPayFrequency(e.target.value)}
-                    >
-                      <option value="monthly">Monthly</option>
-                      <option value="quarterly">Quarterly</option>
-                    </select>
-                  </div>
-                </div>
-                {formOte && formBaseSalary && (
-                  <p className="text-xs text-gray-500 mt-2">
-                    Variable pay: {formatCurrency(parseFloat(formOte || '0') - parseFloat(formBaseSalary || '0'))}/yr
-                    {formQuotaAmount && (
-                      <> | Effective rate at OTE: {formatPercent((parseFloat(formOte || '0') - parseFloat(formBaseSalary || '0')) / parseFloat(formQuotaAmount || '1'))}</>
-                    )}
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label className="label">Plan Type</label>
-                <select
-                  className="input"
-                  value={formPlanType}
-                  onChange={(e) => setFormPlanType(e.target.value)}
-                >
-                  <option value="flat_rate">Flat Rate - Same % on every deal</option>
-                  <option value="tiered">Tiered - Different % based on deal amount ranges</option>
-                  <option value="accelerator">
-                    Accelerator - Higher % as total volume increases
-                  </option>
-                </select>
-              </div>
-
-              {/* Tiers */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="label mb-0">
-                    {formPlanType === 'flat_rate' ? 'Rate' : 'Tiers'}
-                  </label>
-                  {formPlanType !== 'flat_rate' && (
-                    <button
-                      type="button"
-                      onClick={addTier}
-                      className="text-sm text-brand-600 hover:text-brand-700 font-medium"
-                    >
-                      + Add Tier
-                    </button>
-                  )}
-                </div>
-                <div className="space-y-3">
-                  {formTiers.map((tier, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg"
-                    >
-                      {formPlanType !== 'flat_rate' && (
-                        <>
-                          <div className="flex-1">
-                            <label className="text-xs text-gray-500">Min ($)</label>
-                            <input
-                              type="number"
-                              className="input mt-1"
-                              value={tier.minAmount}
-                              onChange={(e) => updateTier(idx, 'minAmount', e.target.value)}
-                              min="0"
-                            />
-                          </div>
-                          <div className="flex-1">
-                            <label className="text-xs text-gray-500">Max ($)</label>
-                            <input
-                              type="number"
-                              className="input mt-1"
-                              value={tier.maxAmount ?? ''}
-                              onChange={(e) => updateTier(idx, 'maxAmount', e.target.value)}
-                              placeholder="No limit"
-                            />
-                          </div>
-                        </>
-                      )}
-                      <div className={formPlanType === 'flat_rate' ? 'flex-1' : 'w-24'}>
-                        <label className="text-xs text-gray-500">Rate (%)</label>
-                        <input
-                          type="number"
-                          className="input mt-1"
-                          value={(tier.rate * 100).toFixed(1)}
-                          onChange={(e) => updateTier(idx, 'rate', e.target.value)}
-                          step="0.1"
-                          min="0"
-                          max="100"
-                          required
-                        />
-                      </div>
-                      {formPlanType !== 'flat_rate' && formTiers.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removeTier(idx)}
-                          className="text-red-500 hover:text-red-700 mt-4"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button type="submit" className="btn-primary flex-1">
-                  {editingPlan ? 'Update Plan' : 'Create Plan'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="btn-secondary flex-1"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
+      {/* Create Plan Modal */}
+      {showCreatePlan && (
+        <div className="card p-6 mb-6 border-2 border-brand-200">
+          <h3 className="font-semibold text-gray-900 mb-4">Create New Plan</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="label">Plan Name</label>
+              <input className="input" value={planForm.name} onChange={e => setPlanForm({ ...planForm, name: e.target.value })} placeholder="e.g. Senior Consultant - 2026" />
+            </div>
+            <div>
+              <label className="label">Fiscal Year</label>
+              <input className="input" value={planForm.fiscalYear} onChange={e => setPlanForm({ ...planForm, fiscalYear: e.target.value })} />
+            </div>
+            <div className="col-span-2">
+              <label className="label">Description</label>
+              <input className="input" value={planForm.description} onChange={e => setPlanForm({ ...planForm, description: e.target.value })} />
+            </div>
+          </div>
+          <div className="flex gap-2 mt-4">
+            <button onClick={createPlan} className="btn-primary">Create</button>
+            <button onClick={() => setShowCreatePlan(false)} className="btn-secondary">Cancel</button>
           </div>
         </div>
       )}
 
-      {/* Plans Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {plans.map((plan) => (
-          <div key={plan.id} className="card p-6">
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <h3 className="font-semibold text-gray-900">{plan.name}</h3>
-                <span className="badge-blue mt-1">{planTypeLabels[plan.planType]}</span>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Plan list */}
+        <div className="space-y-3">
+          {plans.map(p => (
+            <div
+              key={p.id}
+              onClick={() => setSelectedPlan(p.id)}
+              className={`card p-4 cursor-pointer transition-all ${selectedPlan === p.id ? 'border-2 border-brand-500 bg-brand-50' : 'hover:bg-gray-50'}`}
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-gray-900">{p.name}</h3>
+                <span className={p.isActive ? 'badge-green' : 'badge-red'}>{p.isActive ? 'Active' : 'Inactive'}</span>
               </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => openEditForm(plan)}
-                  className="text-brand-600 hover:text-brand-800 text-sm font-medium"
-                >
-                  Edit
-                </button>
-                <button
-                  onClick={() => handleDelete(plan.id)}
-                  className="text-red-600 hover:text-red-800 text-sm font-medium"
-                >
-                  Delete
-                </button>
-              </div>
+              <p className="text-xs text-gray-500 mt-1">{p.fiscalYear} &middot; {p.components.length} components &middot; {p._count.assignments} assigned</p>
+              {p.description && <p className="text-sm text-gray-600 mt-2">{p.description}</p>}
             </div>
+          ))}
+          {plans.length === 0 && (
+            <div className="card p-6 text-center text-gray-500">No plans yet. Create one to get started.</div>
+          )}
+        </div>
 
-            {plan.description && (
-              <p className="text-sm text-gray-500 mb-3">{plan.description}</p>
-            )}
-
-            {/* OTE / Compensation Info */}
-            {(plan.ote > 0 || plan.quotaAmount > 0) && (
-              <div className="grid grid-cols-2 gap-2 mb-3 p-3 bg-brand-50 rounded-lg text-sm">
-                {plan.ote > 0 && (
-                  <div>
-                    <span className="text-gray-500">OTE</span>
-                    <p className="font-semibold text-brand-700">{formatCurrency(plan.ote)}</p>
-                  </div>
-                )}
-                {plan.baseSalary > 0 && (
-                  <div>
-                    <span className="text-gray-500">Base</span>
-                    <p className="font-semibold text-gray-700">{formatCurrency(plan.baseSalary)}</p>
-                  </div>
-                )}
-                {plan.quotaAmount > 0 && (
-                  <div>
-                    <span className="text-gray-500">Quota</span>
-                    <p className="font-semibold text-gray-700">{formatCurrency(plan.quotaAmount)}</p>
-                  </div>
-                )}
-                {plan.ote > 0 && plan.baseSalary > 0 && (
-                  <div>
-                    <span className="text-gray-500">Variable</span>
-                    <p className="font-semibold text-amber-600">{formatCurrency(plan.ote - plan.baseSalary)}</p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="space-y-2 mb-4">
-              {plan.tiers.map((tier, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center justify-between text-sm bg-gray-50 rounded-lg px-3 py-2"
-                >
-                  <span className="text-gray-600">
-                    {plan.planType === 'flat_rate'
-                      ? 'All deals'
-                      : `${formatCurrency(tier.minAmount)} - ${
-                          tier.maxAmount ? formatCurrency(tier.maxAmount) : 'No limit'
-                        }`}
-                  </span>
-                  <span className="font-semibold text-brand-600">
-                    {formatPercent(tier.rate)}
-                  </span>
+        {/* Plan detail */}
+        {plan ? (
+          <div className="lg:col-span-2 space-y-6">
+            {/* Components */}
+            <div className="card p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-gray-900">Components</h3>
+                <div className="flex gap-2">
+                  <button onClick={() => setShowAddComponent(true)} className="btn-primary text-sm">Add Component</button>
+                  <button onClick={() => deletePlan(plan.id)} className="btn-danger text-sm">Delete Plan</button>
                 </div>
-              ))}
+              </div>
+
+              {showAddComponent && (
+                <div className="p-4 bg-gray-50 rounded-lg mb-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="label">Name</label>
+                      <input className="input" value={compForm.name} onChange={e => setCompForm({ ...compForm, name: e.target.value })} placeholder="e.g. Permanent Placements" />
+                    </div>
+                    <div>
+                      <label className="label">Type</label>
+                      <select className="input" value={compForm.type} onChange={e => setCompForm({ ...compForm, type: e.target.value })}>
+                        {componentTypes.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label">Rate (decimal, e.g. 0.10 = 10%)</label>
+                      <input className="input" type="number" step="0.000001" value={compForm.rate} onChange={e => setCompForm({ ...compForm, rate: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="label">Rate Type</label>
+                      <select className="input" value={compForm.isPercentage ? 'pct' : 'flat'} onChange={e => setCompForm({ ...compForm, isPercentage: e.target.value === 'pct' })}>
+                        <option value="pct">Percentage</option>
+                        <option value="flat">Flat Amount</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label">Min Value (tier)</label>
+                      <input className="input" type="number" value={compForm.minValue} onChange={e => setCompForm({ ...compForm, minValue: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="label">Max Value (tier)</label>
+                      <input className="input" type="number" value={compForm.maxValue} onChange={e => setCompForm({ ...compForm, maxValue: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="label">Tier Number</label>
+                      <input className="input" type="number" value={compForm.tier} onChange={e => setCompForm({ ...compForm, tier: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="label">Account Filter</label>
+                      <input className="input" value={compForm.accountFilter} onChange={e => setCompForm({ ...compForm, accountFilter: e.target.value })} placeholder="e.g. Mobileye" />
+                    </div>
+                    {compForm.type === 'KICKER' && (
+                      <div className="col-span-2">
+                        <label className="label">Kicker Threshold (NFI)</label>
+                        <input className="input" type="number" value={compForm.kickerThreshold} onChange={e => setCompForm({ ...compForm, kickerThreshold: e.target.value })} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <button onClick={addComponent} className="btn-primary text-sm">Add</button>
+                    <button onClick={() => setShowAddComponent(false)} className="btn-secondary text-sm">Cancel</button>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                {plan.components.filter(c => c.isActive).map(comp => (
+                  <div key={comp.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <div>
+                      <p className="text-sm font-medium">{comp.name}</p>
+                      <p className="text-xs text-gray-500">
+                        {componentTypes.find(t => t.value === comp.type)?.label || comp.type}
+                        {comp.tier !== null && ` (Tier ${comp.tier})`}
+                        {comp.accountFilter && ` - ${comp.accountFilter}`}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold">
+                        {comp.isPercentage ? `${(Number(comp.rate) * 100).toFixed(1)}%` : `£${Number(comp.rate).toFixed(2)}`}
+                      </p>
+                      {comp.minValue !== null && (
+                        <p className="text-xs text-gray-500">
+                          £{Number(comp.minValue).toLocaleString()} - {comp.maxValue ? `£${Number(comp.maxValue).toLocaleString()}` : '∞'}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {plan.components.filter(c => c.isActive).length === 0 && (
+                  <p className="text-sm text-gray-500 text-center py-4">No components yet. Add one above.</p>
+                )}
+              </div>
             </div>
 
-            <div className="pt-3 border-t border-gray-100 flex items-center justify-between">
-              <span className="text-xs text-gray-500">
-                {plan._count.users} {plan._count.users === 1 ? 'rep' : 'reps'} assigned
-              </span>
-              <span className="text-xs text-gray-400 capitalize">{plan.payFrequency}</span>
+            {/* Assignments */}
+            <div className="card p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-gray-900">Assigned Users</h3>
+                <button onClick={() => setShowAssign(true)} className="btn-primary text-sm">Assign User</button>
+              </div>
+
+              {showAssign && (
+                <div className="p-4 bg-gray-50 rounded-lg mb-4">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="label">User</label>
+                      <select className="input" value={assignForm.userId} onChange={e => setAssignForm({ ...assignForm, userId: e.target.value })}>
+                        <option value="">Select user...</option>
+                        {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label">Start Date</label>
+                      <input className="input" type="date" value={assignForm.startDate} onChange={e => setAssignForm({ ...assignForm, startDate: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="label">End Date (optional)</label>
+                      <input className="input" type="date" value={assignForm.endDate} onChange={e => setAssignForm({ ...assignForm, endDate: e.target.value })} />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <button onClick={assignPlan} className="btn-primary text-sm">Assign</button>
+                    <button onClick={() => setShowAssign(false)} className="btn-secondary text-sm">Cancel</button>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                {plan.assignments.map(a => (
+                  <div key={a.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <div>
+                      <p className="text-sm font-medium">{a.user.name}</p>
+                      <p className="text-xs text-gray-500">{a.user.email}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500">
+                        {new Date(a.startDate).toLocaleDateString()} - {a.endDate ? new Date(a.endDate).toLocaleDateString() : 'Ongoing'}
+                      </p>
+                      <p className="text-xs text-gray-500">{a.components.length} components</p>
+                    </div>
+                  </div>
+                ))}
+                {plan.assignments.length === 0 && (
+                  <p className="text-sm text-gray-500 text-center py-4">No users assigned yet.</p>
+                )}
+              </div>
             </div>
           </div>
-        ))}
-
-        {plans.length === 0 && (
-          <div className="col-span-full text-center py-16 text-gray-500">
-            <p className="text-lg mb-2">No commission plans yet</p>
-            <p className="text-sm">Create your first plan to start calculating commissions.</p>
+        ) : (
+          <div className="lg:col-span-2 card p-8 text-center text-gray-500">
+            Select a plan to view details
           </div>
         )}
       </div>

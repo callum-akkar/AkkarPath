@@ -6,227 +6,258 @@ const prisma = new PrismaClient()
 async function main() {
   console.log('Seeding database...')
 
-  // Create admin user
-  const adminHash = await bcrypt.hash('admin123', 10)
+  const passwordHash = await bcrypt.hash('akkar2026', 12)
+
+  // Create admin user (Callum)
   const admin = await prisma.user.upsert({
-    where: { email: 'admin@akkar.com' },
+    where: { email: 'callum@akkar.com' },
     update: {},
     create: {
-      email: 'admin@akkar.com',
-      name: 'Callum (Admin)',
-      passwordHash: adminHash,
-      role: 'admin',
+      email: 'callum@akkar.com',
+      name: 'Callum Akkar',
+      passwordHash,
+      role: 'ADMIN',
+      jobTitle: 'Director',
     },
   })
 
-  // Create commission plans with OTE, base salary, and quota
-  const flatPlan = await prisma.commissionPlan.create({
-    data: {
-      name: 'Standard 10%',
-      description: 'Flat 10% commission on all closed-won deals',
-      planType: 'flat_rate',
-      ote: 120000,
-      baseSalary: 60000,
-      quotaAmount: 600000,
-      payFrequency: 'monthly',
-      tiers: {
-        create: [{ minAmount: 0, maxAmount: null, rate: 0.10, orderIndex: 0 }],
-      },
-    },
-  })
-
-  const tieredPlan = await prisma.commissionPlan.create({
-    data: {
-      name: 'Tiered Growth',
-      description: 'Higher rates for larger deals - rewards bigger wins',
-      planType: 'tiered',
-      ote: 150000,
-      baseSalary: 75000,
-      quotaAmount: 750000,
-      payFrequency: 'monthly',
-      tiers: {
-        create: [
-          { minAmount: 0, maxAmount: 10000, rate: 0.08, orderIndex: 0 },
-          { minAmount: 10000, maxAmount: 50000, rate: 0.10, orderIndex: 1 },
-          { minAmount: 50000, maxAmount: null, rate: 0.12, orderIndex: 2 },
-        ],
-      },
-    },
-  })
-
-  const acceleratorPlan = await prisma.commissionPlan.create({
-    data: {
-      name: 'Accelerator',
-      description: 'Higher rates as you close more revenue - rewards overachievers',
-      planType: 'accelerator',
-      ote: 180000,
-      baseSalary: 80000,
-      quotaAmount: 1000000,
-      payFrequency: 'monthly',
-      hasRamp: true,
-      tiers: {
-        create: [
-          { minAmount: 0, maxAmount: 250000, rate: 0.08, orderIndex: 0 },
-          { minAmount: 250000, maxAmount: 750000, rate: 0.10, orderIndex: 1 },
-          { minAmount: 750000, maxAmount: null, rate: 0.15, orderIndex: 2 },
-        ],
-      },
-      rampSchedule: {
-        create: [
-          { month: 1, quotaPct: 0.25, commissionPct: 1.0 },
-          { month: 2, quotaPct: 0.50, commissionPct: 1.0 },
-          { month: 3, quotaPct: 0.75, commissionPct: 1.0 },
-        ],
-      },
-    },
-  })
-
-  // Assign admin to flat plan
-  await prisma.user.update({
-    where: { id: admin.id },
-    data: { planId: flatPlan.id },
-  })
-
-  // Create sales reps
-  const repHash = await bcrypt.hash('rep123', 10)
-
-  const rep1 = await prisma.user.create({
-    data: {
-      email: 'sarah@akkar.com',
+  // Create a manager
+  const manager = await prisma.user.upsert({
+    where: { email: 'manager@akkar.com' },
+    update: {},
+    create: {
+      email: 'manager@akkar.com',
       name: 'Sarah Johnson',
-      passwordHash: repHash,
-      role: 'rep',
-      planId: tieredPlan.id,
+      passwordHash,
+      role: 'MANAGER',
+      managerId: admin.id,
+      jobTitle: 'Team Lead',
     },
   })
 
-  const rep2 = await prisma.user.create({
-    data: {
+  // Create reps
+  const rep1 = await prisma.user.upsert({
+    where: { email: 'mike@akkar.com' },
+    update: {},
+    create: {
       email: 'mike@akkar.com',
       name: 'Mike Chen',
-      passwordHash: repHash,
-      role: 'rep',
-      planId: acceleratorPlan.id,
+      passwordHash,
+      role: 'REP',
+      managerId: manager.id,
+      jobTitle: 'Senior Consultant',
     },
   })
 
-  const rep3 = await prisma.user.create({
-    data: {
+  const rep2 = await prisma.user.upsert({
+    where: { email: 'emily@akkar.com' },
+    update: {},
+    create: {
       email: 'emily@akkar.com',
       name: 'Emily Davis',
-      passwordHash: repHash,
-      role: 'rep',
-      planId: flatPlan.id,
+      passwordHash,
+      role: 'REP',
+      managerId: manager.id,
+      jobTitle: 'Consultant',
     },
   })
 
-  // Set quota targets for all reps for current year
-  const now = new Date()
-  const year = now.getFullYear()
-  const reps = [
-    { id: rep1.id, monthlyQuota: 62500 },   // 750k / 12
-    { id: rep2.id, monthlyQuota: 83333 },   // 1M / 12
-    { id: rep3.id, monthlyQuota: 50000 },   // 600k / 12
-  ]
+  console.log('  Created users')
 
-  for (const rep of reps) {
+  // Create a commission plan
+  const plan = await prisma.commissionPlan.create({
+    data: {
+      name: 'Standard Consultant Plan - 2026',
+      description: 'Standard commission plan for consultants',
+      fiscalYear: '2026',
+      currency: 'GBP',
+      components: {
+        create: [
+          {
+            name: 'Permanent Placements',
+            type: 'PLACEMENT_PERM',
+            rate: 0.10,
+            isPercentage: true,
+          },
+          {
+            name: 'Contract Placements',
+            type: 'PLACEMENT_CONTRACT',
+            rate: 0.08,
+            isPercentage: true,
+          },
+          {
+            name: 'Timesheets',
+            type: 'TIMESHEET',
+            rate: 0.05,
+            isPercentage: true,
+          },
+          {
+            name: 'Performance Kicker',
+            type: 'KICKER',
+            rate: 0.02,
+            isPercentage: true,
+            kickerThreshold: 100000,
+          },
+        ],
+      },
+    },
+    include: { components: true },
+  })
+
+  // Create a manager override plan
+  const overridePlan = await prisma.commissionPlan.create({
+    data: {
+      name: 'Manager Override Plan - 2026',
+      description: 'Override commission for managers on team deals',
+      fiscalYear: '2026',
+      currency: 'GBP',
+      components: {
+        create: [
+          {
+            name: 'Team Override',
+            type: 'OVERRIDE',
+            rate: 0.03,
+            isPercentage: true,
+          },
+        ],
+      },
+    },
+    include: { components: true },
+  })
+
+  console.log('  Created commission plans')
+
+  // Assign plans to users
+  const startDate = new Date('2026-01-01')
+
+  // Assign consultant plan to reps
+  for (const rep of [rep1, rep2]) {
+    await prisma.userPlanAssignment.create({
+      data: {
+        userId: rep.id,
+        commissionPlanId: plan.id,
+        startDate,
+        components: {
+          connect: plan.components.map(c => ({ id: c.id })),
+        },
+      },
+    })
+  }
+
+  // Assign override plan to manager
+  await prisma.userPlanAssignment.create({
+    data: {
+      userId: manager.id,
+      commissionPlanId: overridePlan.id,
+      startDate,
+      components: {
+        connect: overridePlan.components.map(c => ({ id: c.id })),
+      },
+    },
+  })
+
+  // Also assign consultant plan to manager for their own deals
+  await prisma.userPlanAssignment.create({
+    data: {
+      userId: manager.id,
+      commissionPlanId: plan.id,
+      startDate,
+      components: {
+        connect: plan.components.map(c => ({ id: c.id })),
+      },
+    },
+  })
+
+  console.log('  Assigned plans')
+
+  // Create targets for current year
+  const year = 2026
+  for (const rep of [manager, rep1, rep2]) {
     for (let month = 1; month <= 12; month++) {
       const period = `${year}-${String(month).padStart(2, '0')}`
-      await prisma.quotaTarget.create({
-        data: {
-          repId: rep.id,
+      await prisma.target.upsert({
+        where: { userId_period: { userId: rep.id, period } },
+        update: {},
+        create: {
+          userId: rep.id,
           period,
-          periodType: 'monthly',
-          targetAmount: rep.monthlyQuota,
+          nfiTargetGBP: rep.id === rep1.id ? 50000 : rep.id === rep2.id ? 40000 : 60000,
+          placementTargetCount: 3,
         },
       })
     }
   }
 
-  console.log('  Created quota targets for all reps')
+  console.log('  Created targets')
 
-  // Create sample deals
-  const thisMonth = new Date(now.getFullYear(), now.getMonth(), 15)
-  const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 15)
-  const twoMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 2, 15)
-
-  const deals = [
-    { name: 'Acme Corp - Enterprise', amount: 75000, status: 'closed_won', closeDate: lastMonth, repId: rep1.id },
-    { name: 'TechStart - Growth Plan', amount: 25000, status: 'closed_won', closeDate: lastMonth, repId: rep1.id },
-    { name: 'Global Retail - Annual', amount: 120000, status: 'closed_won', closeDate: twoMonthsAgo, repId: rep2.id },
-    { name: 'StartupXYZ - Starter', amount: 8000, status: 'closed_won', closeDate: lastMonth, repId: rep2.id },
-    { name: 'MegaCorp - Multi-year', amount: 200000, status: 'open', closeDate: null, repId: rep1.id },
-    { name: 'DataFlow Inc', amount: 45000, status: 'closed_won', closeDate: thisMonth, repId: rep3.id },
-    { name: 'CloudNine Systems', amount: 32000, status: 'closed_won', closeDate: twoMonthsAgo, repId: rep3.id },
-    { name: 'FinTech Solutions', amount: 68000, status: 'closed_won', closeDate: lastMonth, repId: rep3.id },
-    { name: 'HealthPlus', amount: 15000, status: 'closed_lost', closeDate: lastMonth, repId: rep2.id },
-    { name: 'EduTech Group', amount: 52000, status: 'open', closeDate: null, repId: rep2.id },
-    { name: 'RetailMax', amount: 38000, status: 'closed_won', closeDate: thisMonth, repId: rep1.id },
-    { name: 'LogiTrans', amount: 90000, status: 'open', closeDate: null, repId: rep3.id },
-  ]
-
-  for (const deal of deals) {
-    await prisma.deal.create({ data: deal })
-  }
-
-  // Generate commissions for closed-won deals
-  const closedDeals = await prisma.deal.findMany({
-    where: { status: 'closed_won' },
-    include: {
-      rep: { include: { plan: { include: { tiers: true } } } },
-    },
+  // Create sample SF accounts and placements for testing
+  const account1 = await prisma.sFAccount.create({
+    data: { salesforceId: 'SF_ACC_001', name: 'TechCorp Ltd' },
   })
 
-  for (const deal of closedDeals) {
-    if (!deal.rep.plan) continue
+  const account2 = await prisma.sFAccount.create({
+    data: { salesforceId: 'SF_ACC_002', name: 'Mobileye' },
+  })
 
-    const plan = deal.rep.plan
-    const tiers = plan.tiers.sort((a, b) => a.orderIndex - b.orderIndex)
-    let commissionAmount = 0
+  // Create sample placements
+  const placements = [
+    { name: 'PL-001 Senior Developer', accountId: account1.id, ownerUserId: rep1.id, nfiValue: 25000, placementType: 'PERM' as const, invoicedDate: new Date('2026-02-10'), paidToAkkar: true },
+    { name: 'PL-002 Project Manager', accountId: account1.id, ownerUserId: rep1.id, nfiValue: 30000, placementType: 'PERM' as const, invoicedDate: new Date('2026-02-15'), paidToAkkar: true },
+    { name: 'PL-003 Data Analyst', accountId: account2.id, ownerUserId: rep2.id, nfiValue: 18000, placementType: 'PERM' as const, invoicedDate: new Date('2026-02-08'), paidToAkkar: true },
+    { name: 'PL-004 Contract Developer', accountId: account1.id, ownerUserId: rep2.id, nfiValue: 15000, placementType: 'CONTRACT' as const, invoicedDate: new Date('2026-01-20'), paidToAkkar: true },
+    { name: 'PL-005 QA Engineer', accountId: account2.id, ownerUserId: manager.id, nfiValue: 22000, placementType: 'PERM' as const, invoicedDate: new Date('2026-02-18'), paidToAkkar: true },
+  ]
 
-    if (plan.planType === 'flat_rate') {
-      commissionAmount = deal.amount * (tiers[0]?.rate || 0)
-    } else if (plan.planType === 'tiered') {
-      let remaining = deal.amount
-      for (const tier of tiers) {
-        if (remaining <= 0) break
-        const tierMax = tier.maxAmount ?? Infinity
-        const tierRange = tierMax - tier.minAmount
-        const amountInTier = Math.min(remaining, tierRange)
-        commissionAmount += amountInTier * tier.rate
-        remaining -= amountInTier
-      }
-    } else if (plan.planType === 'accelerator') {
-      let rate = tiers[0]?.rate || 0
-      for (const tier of tiers) {
-        if (deal.amount >= tier.minAmount) rate = tier.rate
-      }
-      commissionAmount = deal.amount * rate
-    }
-
-    const period = deal.closeDate
-      ? `${deal.closeDate.getFullYear()}-${String(deal.closeDate.getMonth() + 1).padStart(2, '0')}`
-      : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-
-    await prisma.commission.create({
+  for (const pl of placements) {
+    await prisma.placement.create({
       data: {
-        amount: commissionAmount,
-        status: Math.random() > 0.5 ? 'paid' : 'pending',
-        period,
-        dealId: deal.id,
-        repId: deal.repId,
-        planId: plan.id,
+        salesforceId: `SF_${pl.name.replace(/\s/g, '_')}`,
+        name: pl.name,
+        accountId: pl.accountId,
+        ownerSalesforceUserId: 'SF_USER_PLACEHOLDER',
+        ownerUserId: pl.ownerUserId,
+        nfiValue: pl.nfiValue,
+        placedDate: new Date(pl.invoicedDate.getTime() - 30 * 24 * 60 * 60 * 1000),
+        invoicedDate: pl.invoicedDate,
+        paidToAkkar: pl.paidToAkkar,
+        placementType: pl.placementType,
       },
     })
   }
 
+  // Create sample timesheets
+  const timesheets = [
+    { name: 'TS-001 Contract Dev Week 1', accountId: account1.id, ownerUserId: rep2.id, grossValue: 3500, nfiValue: 1200, weekEnding: new Date('2026-02-07') },
+    { name: 'TS-002 Contract Dev Week 2', accountId: account1.id, ownerUserId: rep2.id, grossValue: 3500, nfiValue: 1200, weekEnding: new Date('2026-02-14') },
+    { name: 'TS-003 Contract Dev Week 3', accountId: account1.id, ownerUserId: rep2.id, grossValue: 3500, nfiValue: 1200, weekEnding: new Date('2026-02-21') },
+  ]
+
+  for (const ts of timesheets) {
+    await prisma.timesheet.create({
+      data: {
+        salesforceId: `SF_${ts.name.replace(/\s/g, '_')}`,
+        name: ts.name,
+        accountId: ts.accountId,
+        ownerSalesforceUserId: 'SF_USER_PLACEHOLDER',
+        ownerUserId: ts.ownerUserId,
+        weekEnding: ts.weekEnding,
+        grossValue: ts.grossValue,
+        nfiValue: ts.nfiValue,
+        paidToAkkar: true,
+      },
+    })
+  }
+
+  console.log('  Created sample placements and timesheets')
+
+  console.log('')
   console.log('Seed complete!')
   console.log('')
-  console.log('Login credentials:')
-  console.log('  Admin: admin@akkar.com / admin123')
-  console.log('  Reps:  sarah@akkar.com / rep123')
-  console.log('         mike@akkar.com  / rep123')
-  console.log('         emily@akkar.com / rep123')
+  console.log('Login credentials (password: akkar2026):')
+  console.log('  Admin:   callum@akkar.com')
+  console.log('  Manager: manager@akkar.com')
+  console.log('  Reps:    mike@akkar.com')
+  console.log('           emily@akkar.com')
 }
 
 main()
