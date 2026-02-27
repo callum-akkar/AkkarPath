@@ -22,8 +22,8 @@ export default async function DashboardLayout({
         email: session.user.email || '',
         role: session.user.role,
       }} />
-      <main className="pl-64">
-        <div className="p-8">{children}</div>
+      <main className="pt-14 md:pt-0 md:pl-64">
+        <div className="p-4 md:p-8">{children}</div>
       </main>
     </div>
   )

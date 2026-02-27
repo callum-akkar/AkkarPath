@@ -21,6 +21,7 @@ async function main() {
       jobTitle: 'Director',
       department: 'Leadership',
       salary: 80000,
+      startDate: new Date('2020-01-06'),
     },
   })
 
@@ -36,6 +37,7 @@ async function main() {
       jobTitle: 'Recruitment Manager',
       department: 'Recruitment',
       salary: 55000,
+      startDate: new Date('2022-03-14'),
     },
   })
 
@@ -51,6 +53,7 @@ async function main() {
       jobTitle: '360 Recruiter',
       department: 'Recruitment',
       salary: 35000,
+      startDate: new Date('2023-09-04'),
     },
   })
 
@@ -66,6 +69,7 @@ async function main() {
       jobTitle: 'Delivery Recruiter',
       department: 'Recruitment',
       salary: 30000,
+      startDate: new Date('2024-06-10'),
     },
   })
 
@@ -604,6 +608,70 @@ async function main() {
     }
 
     console.log('  Created sample placements and timesheets')
+
+    // ─── Team Targets (FY26/27) ───────────────────────────────────────
+
+    // Sarah Johnson (manager) team target: £150,000 per quarter
+    for (const q of fyQuarters) {
+      await prisma.teamTarget.upsert({
+        where: { managerId_period: { managerId: manager.id, period: q } },
+        update: { nfiTargetGBP: 150000 },
+        create: {
+          managerId: manager.id,
+          period: q,
+          nfiTargetGBP: 150000,
+          placementTarget: 9,
+        },
+      })
+    }
+
+    // Callum (admin) team target: £300,000 per quarter (whole company)
+    for (const q of fyQuarters) {
+      await prisma.teamTarget.upsert({
+        where: { managerId_period: { managerId: admin.id, period: q } },
+        update: { nfiTargetGBP: 300000 },
+        create: {
+          managerId: admin.id,
+          period: q,
+          nfiTargetGBP: 300000,
+          placementTarget: 18,
+        },
+      })
+    }
+
+    console.log('  Created team targets')
+
+    // ─── Client Targets (FY26/27) ─────────────────────────────────────
+
+    // Mike's client targets
+    for (const q of fyQuarters) {
+      await prisma.clientTarget.upsert({
+        where: { userId_accountId_period: { userId: rep1.id, accountId: account1.id, period: q } },
+        update: { nfiTargetGBP: 25000 },
+        create: {
+          userId: rep1.id,
+          accountId: account1.id,
+          period: q,
+          nfiTargetGBP: 25000,
+        },
+      })
+    }
+
+    // Emily's client targets
+    for (const q of fyQuarters) {
+      await prisma.clientTarget.upsert({
+        where: { userId_accountId_period: { userId: rep2.id, accountId: account2.id, period: q } },
+        update: { nfiTargetGBP: 20000 },
+        create: {
+          userId: rep2.id,
+          accountId: account2.id,
+          period: q,
+          nfiTargetGBP: 20000,
+        },
+      })
+    }
+
+    console.log('  Created client targets')
   } catch (err) {
     console.log('  Skipped sample data (may already exist):', (err as Error).message)
   }

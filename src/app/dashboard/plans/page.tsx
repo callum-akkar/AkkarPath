@@ -239,7 +239,7 @@ export default function PlansPage() {
   function renderComponentForm(isNew: boolean) {
     return (
       <div className="p-4 bg-gray-50 rounded-lg mb-4">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="label">Name</label>
             <input className="input" value={compForm.name} onChange={e => setCompForm({ ...compForm, name: e.target.value })} placeholder="e.g. Permanent Placements" />
@@ -278,7 +278,7 @@ export default function PlansPage() {
             <input className="input" value={compForm.accountFilter} onChange={e => setCompForm({ ...compForm, accountFilter: e.target.value })} placeholder="e.g. Mobileye" />
           </div>
           {compForm.type === 'KICKER' && (
-            <div className="col-span-2">
+            <div className="sm:col-span-2">
               <label className="label">Kicker Threshold (NFI)</label>
               <input className="input" type="number" value={compForm.kickerThreshold} onChange={e => setCompForm({ ...compForm, kickerThreshold: e.target.value })} />
             </div>
@@ -302,7 +302,7 @@ export default function PlansPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Commission Plans</h1>
           <p className="text-gray-500 text-sm mt-1">{plans.length} plans configured</p>
@@ -314,7 +314,7 @@ export default function PlansPage() {
       {showCreatePlan && (
         <div className="card p-6 mb-6 border-2 border-brand-200">
           <h3 className="font-semibold text-gray-900 mb-4">Create New Plan</h3>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="label">Plan Name</label>
               <input className="input" value={planForm.name} onChange={e => setPlanForm({ ...planForm, name: e.target.value })} placeholder="e.g. Senior Consultant - 2026" />
@@ -323,7 +323,7 @@ export default function PlansPage() {
               <label className="label">Fiscal Year</label>
               <input className="input" value={planForm.fiscalYear} onChange={e => setPlanForm({ ...planForm, fiscalYear: e.target.value })} />
             </div>
-            <div className="col-span-2">
+            <div className="sm:col-span-2">
               <label className="label">Description</label>
               <input className="input" value={planForm.description} onChange={e => setPlanForm({ ...planForm, description: e.target.value })} />
             </div>
@@ -500,7 +500,7 @@ export default function PlansPage() {
 
               {showAssign && (
                 <div className="p-4 bg-gray-50 rounded-lg mb-4">
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <label className="label">User</label>
                       <select className="input" value={assignForm.userId} onChange={e => setAssignForm({ ...assignForm, userId: e.target.value })}>

@@ -154,7 +154,7 @@ export default function AdminPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 bg-gray-100 rounded-lg p-1 w-fit">
+      <div className="flex gap-1 mb-6 bg-gray-100 rounded-lg p-1 w-fit overflow-x-auto">
         {tabs.map(t => (
           <button
             key={t.key}
@@ -177,7 +177,7 @@ export default function AdminPage() {
           {showCreateUser && (
             <div className="card p-6 mb-4 border-2 border-brand-200">
               <h3 className="font-semibold mb-4">Create New User</h3>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div><label className="label">Name</label><input className="input" value={userForm.name} onChange={e => setUserForm({ ...userForm, name: e.target.value })} /></div>
                 <div><label className="label">Email</label><input className="input" type="email" value={userForm.email} onChange={e => setUserForm({ ...userForm, email: e.target.value })} /></div>
                 <div><label className="label">Password</label><input className="input" type="password" value={userForm.password} onChange={e => setUserForm({ ...userForm, password: e.target.value })} /></div>
@@ -207,6 +207,7 @@ export default function AdminPage() {
           )}
 
           <div className="card overflow-hidden">
+            <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-100">
@@ -270,6 +271,7 @@ export default function AdminPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}
@@ -327,7 +329,7 @@ export default function AdminPage() {
           <div className="card p-6">
             <h3 className="font-semibold text-gray-900 mb-2">Approval & Payment</h3>
             <p className="text-sm text-gray-500 mb-4">Bulk approve or mark as paid for a period.</p>
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-4">
               <input type="month" value={calcPeriod} onChange={e => setCalcPeriod(e.target.value)} className="input" />
               <button onClick={bulkApprove} className="btn-primary">Approve All Pending</button>
               <button onClick={bulkPay} className="btn-success">Mark All as Paid</button>
