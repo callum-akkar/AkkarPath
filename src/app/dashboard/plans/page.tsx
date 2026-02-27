@@ -56,12 +56,14 @@ export default function PlansPage() {
   const [showAssign, setShowAssign] = useState(false)
   const [editingPlanId, setEditingPlanId] = useState<string | null>(null)
   const [editingCompId, setEditingCompId] = useState<string | null>(null)
+  const [cloningPlanId, setCloningPlanId] = useState<string | null>(null)
   const [users, setUsers] = useState<{ id: string; name: string; email: string }[]>([])
 
   // Form states
   const [planForm, setPlanForm] = useState({ name: '', description: '', fiscalYear: String(new Date().getFullYear()), currency: 'GBP' })
   const [compForm, setCompForm] = useState(emptyCompForm)
   const [assignForm, setAssignForm] = useState({ userId: '', startDate: '', endDate: '' })
+  const [cloneForm, setCloneForm] = useState({ newName: '', newFiscalYear: '' })
 
   const loadPlans = useCallback(async () => {
     setLoading(true)
@@ -208,6 +210,30 @@ export default function PlansPage() {
     await fetch(`/api/plans/${id}`, { method: 'DELETE' })
     setSelectedPlan(null)
     loadPlans()
+  }
+
+  function startClonePlan(p: Plan) {
+    setCloningPlanId(p.id)
+    // Pre-fill with next fiscal year guess
+    const currentYear = new Date().getFullYear()
+    const nextFY = `FY${String(currentYear).slice(2)}/${String(currentYear + 1).slice(2)}`
+    setCloneForm({ newName: `${p.name} (Copy)`, newFiscalYear: p.fiscalYear || nextFY })
+  }
+
+  async function submitClonePlan() {
+    if (!cloningPlanId) return
+    const res = await fetch(`/api/plans/${cloningPlanId}/clone`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cloneForm),
+    })
+    if (res.ok) {
+      const newPlan = await res.json()
+      setCloningPlanId(null)
+      setCloneForm({ newName: '', newFiscalYear: '' })
+      await loadPlans()
+      setSelectedPlan(newPlan.id)
+    }
   }
 
   function renderComponentForm(isNew: boolean) {
@@ -361,10 +387,35 @@ export default function PlansPage() {
                       >
                         Edit
                       </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); startClonePlan(p) }}
+                        className="text-xs text-purple-600 hover:text-purple-700 font-medium"
+                      >
+                        Clone
+                      </button>
                     </div>
                   </div>
                   <p className="text-xs text-gray-500 mt-1">{p.fiscalYear} &middot; {p.components.length} components &middot; {p._count.assignments} assigned</p>
                   {p.description && <p className="text-sm text-gray-600 mt-2">{p.description}</p>}
+                  {cloningPlanId === p.id && (
+                    <div className="mt-3 p-3 bg-purple-50 rounded-lg border border-purple-200" onClick={e => e.stopPropagation()}>
+                      <h4 className="text-xs font-semibold text-purple-900 mb-2">Clone Plan</h4>
+                      <div className="space-y-2">
+                        <div>
+                          <label className="text-xs text-gray-600">New Name</label>
+                          <input className="input text-sm" value={cloneForm.newName} onChange={e => setCloneForm({ ...cloneForm, newName: e.target.value })} />
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-600">Fiscal Year</label>
+                          <input className="input text-sm" value={cloneForm.newFiscalYear} onChange={e => setCloneForm({ ...cloneForm, newFiscalYear: e.target.value })} placeholder="e.g. FY27/28" />
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={submitClonePlan} className="btn-primary text-xs">Clone</button>
+                          <button onClick={() => setCloningPlanId(null)} className="btn-secondary text-xs">Cancel</button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

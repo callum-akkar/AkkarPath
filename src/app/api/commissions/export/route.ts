@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { getMonthsInQuarter } from '@/lib/fiscal-year'
 
 export async function GET(req: NextRequest) {
   try {
@@ -96,8 +97,8 @@ export async function GET(req: NextRequest) {
         e.isClawback ? 'Yes' : 'No',
         e.isManualOverride ? 'Yes' : 'No',
         e.manualOverrideNote || '',
-        e.payoutDate ? e.payoutDate.toISOString().split('T')[0] : '',
-        e.createdAt.toISOString().split('T')[0],
+        e.payoutDate ? new Date(e.payoutDate).toISOString().split('T')[0] : '',
+        new Date(e.createdAt).toISOString().split('T')[0],
       ]
     })
 
@@ -133,15 +134,33 @@ async function handlePayrollSummary(period: string | null) {
     orderBy: { name: 'asc' },
   })
 
-  // Build commission where clause
-  const commissionWhere: Record<string, unknown> = {
-    status: { in: ['APPROVED', 'PAID'] },
+  // Determine which periods to query
+  // If period is a fiscal quarter format (FY26/27-Q1), use months in that quarter
+  let fiscalQuarterLabel = period || 'All'
+  let isFiscalQuarter = false
+  let commissionPeriodFilter: Record<string, unknown> = {}
+
+  if (period && /^FY\d{2}\/\d{2}-Q[1-4]$/.test(period)) {
+    isFiscalQuarter = true
+    const months = getMonthsInQuarter(period)
+    fiscalQuarterLabel = period
+    // Match entries with either monthly period format or fiscal quarter format
+    commissionPeriodFilter = {
+      OR: [
+        { period: { in: months } },
+        { period: period },
+      ],
+    }
+  } else if (period) {
+    commissionPeriodFilter = { period }
   }
-  if (period) commissionWhere.period = period
 
   // Get all commission entries for the period
   const commissionEntries = await prisma.commissionEntry.findMany({
-    where: commissionWhere,
+    where: {
+      status: { in: ['APPROVED', 'PAID'] },
+      ...commissionPeriodFilter,
+    },
     select: {
       userId: true,
       commissionAmount: true,
@@ -149,15 +168,12 @@ async function handlePayrollSummary(period: string | null) {
     },
   })
 
-  // Build bonus where clause
-  const bonusWhere: Record<string, unknown> = {
-    status: { in: ['APPROVED', 'PAID'] },
-  }
-  if (period) bonusWhere.period = period
-
   // Get all bonus entries for the period
   const bonusEntries = await prisma.bonusEntry.findMany({
-    where: bonusWhere,
+    where: {
+      status: { in: ['APPROVED', 'PAID'] },
+      ...commissionPeriodFilter,
+    },
     select: {
       userId: true,
       amount: true,
@@ -188,20 +204,22 @@ async function handlePayrollSummary(period: string | null) {
     'Employee Email',
     'Job Title',
     'Department',
-    'Base Salary',
+    'Base Salary (Quarterly)',
     'Total Commission',
     'Total Bonus',
     'Total Pay',
-    'Period',
-    'Number of Entries',
+    'Fiscal Quarter',
+    'Number of Commission Entries',
     'Status Breakdown',
   ]
 
   const rows = users.map(user => {
     const commission = commissionByUser.get(user.id) || { total: 0, approved: 0, paid: 0, count: 0 }
     const bonus = bonusByUser.get(user.id) || 0
-    const baseSalary = user.salary ? Number(user.salary) : 0
-    const totalPay = baseSalary + commission.total + bonus
+    // Quarterly base salary: annual / 4
+    const annualSalary = user.salary ? Number(user.salary) : 0
+    const quarterlySalary = isFiscalQuarter ? annualSalary / 4 : annualSalary
+    const totalPay = quarterlySalary + commission.total + bonus
 
     const statusParts = []
     if (commission.approved > 0) statusParts.push(`${commission.approved} Approved`)
@@ -213,11 +231,11 @@ async function handlePayrollSummary(period: string | null) {
       user.email,
       user.jobTitle || '',
       user.department || '',
-      baseSalary.toFixed(2),
+      quarterlySalary.toFixed(2),
       commission.total.toFixed(2),
       bonus.toFixed(2),
       totalPay.toFixed(2),
-      period || 'All',
+      fiscalQuarterLabel,
       String(commission.count),
       statusBreakdown,
     ]
@@ -231,7 +249,7 @@ async function handlePayrollSummary(period: string | null) {
   return new Response(csv, {
     headers: {
       'Content-Type': 'text/csv',
-      'Content-Disposition': `attachment; filename="payroll-summary-${period || 'all'}.csv"`,
+      'Content-Disposition': `attachment; filename="payroll-summary-${fiscalQuarterLabel}.csv"`,
     },
   })
 }

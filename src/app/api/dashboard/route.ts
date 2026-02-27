@@ -3,10 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { Decimal } from 'decimal.js'
-
-function dateToPeriod(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-}
+import { getFiscalYear, getFiscalPeriod, getQuarterDateRange, getQuarterLabel, getFiscalQuarter } from '@/lib/fiscal-year'
 
 export async function GET() {
   try {
@@ -15,7 +12,13 @@ export async function GET() {
 
     const { id: userId, role } = session.user
     const now = new Date()
-    const currentPeriod = dateToPeriod(now)
+    const currentFY = getFiscalYear(now)
+    const currentQuarterPeriod = getFiscalPeriod(now)
+    const currentQuarterNum = getFiscalQuarter(now)
+    const currentQuarterLabel = `${currentFY} ${getQuarterLabel(currentQuarterNum)}`
+
+    // Get the date range for the current fiscal quarter
+    const { start: qStart, end: qEnd } = getQuarterDateRange(currentQuarterPeriod)
 
     // Build user filter based on role
     let userIds: string[]
@@ -32,9 +35,9 @@ export async function GET() {
       userIds = [userId]
     }
 
-    // Commission entries for current period
+    // Commission entries for current fiscal quarter
     const currentEntries = await prisma.commissionEntry.findMany({
-      where: { userId: { in: userIds }, period: currentPeriod },
+      where: { userId: { in: userIds }, period: currentQuarterPeriod },
     })
 
     const totalCommissions = currentEntries
@@ -46,14 +49,11 @@ export async function GET() {
       .filter(e => e.status === 'PAID')
       .reduce((sum, e) => sum.add(new Decimal(e.commissionAmount.toString())), new Decimal(0))
 
-    // Revenue from placements this period
-    const periodStart = new Date(now.getFullYear(), now.getMonth(), 1)
-    const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-
+    // Revenue from placements this quarter
     const placements = await prisma.placement.findMany({
       where: {
         ownerUserId: { in: userIds },
-        invoicedDate: { gte: periodStart, lt: periodEnd },
+        invoicedDate: { gte: qStart, lt: qEnd },
         paidToAkkar: true,
       },
     })
@@ -70,36 +70,44 @@ export async function GET() {
 
     // Target for quota attainment (REP only for personal)
     const target = role === 'REP'
-      ? await prisma.target.findUnique({ where: { userId_period: { userId, period: currentPeriod } } })
+      ? await prisma.target.findUnique({ where: { userId_period: { userId, period: currentQuarterPeriod } } })
       : null
     const currentQuota = target ? Number(target.nfiTargetGBP) : 0
     const attainmentPct = currentQuota > 0 ? totalRevenue.toNumber() / currentQuota : 0
 
-    // Monthly data (last 6 months)
-    const monthlyData = []
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      const period = dateToPeriod(d)
-      const mEnd = new Date(d.getFullYear(), d.getMonth() + 1, 1)
-      const label = d.toLocaleString('en-US', { month: 'short' })
+    // Quarterly data (4 quarters of current FY)
+    const quarterlyData = []
+    for (let q = 1; q <= 4; q++) {
+      const period = `${currentFY}-Q${q}`
+      const label = getQuarterLabel(q)
 
-      const [mEntries, mPlacements] = await Promise.all([
+      let qStartDate: Date
+      let qEndDate: Date
+      try {
+        const range = getQuarterDateRange(period)
+        qStartDate = range.start
+        qEndDate = range.end
+      } catch {
+        continue
+      }
+
+      const [qEntries, qPlacements] = await Promise.all([
         prisma.commissionEntry.findMany({ where: { userId: { in: userIds }, period } }),
         prisma.placement.findMany({
-          where: { ownerUserId: { in: userIds }, invoicedDate: { gte: d, lt: mEnd }, paidToAkkar: true },
+          where: { ownerUserId: { in: userIds }, invoicedDate: { gte: qStartDate, lt: qEndDate }, paidToAkkar: true },
         }),
       ])
 
-      const mTarget = role === 'REP'
+      const qTarget = role === 'REP'
         ? await prisma.target.findUnique({ where: { userId_period: { userId, period } } })
         : null
 
-      monthlyData.push({
+      quarterlyData.push({
         period,
         label,
-        revenue: mPlacements.reduce((s, p) => s + Number(p.nfiValue), 0),
-        quota: mTarget ? Number(mTarget.nfiTargetGBP) : 0,
-        commissions: mEntries.reduce((s, e) => s + Number(e.commissionAmount), 0),
+        revenue: qPlacements.reduce((s, p) => s + Number(p.nfiValue), 0),
+        quota: qTarget ? Number(qTarget.nfiTargetGBP) : 0,
+        commissions: qEntries.reduce((s, e) => s + Number(e.commissionAmount), 0),
       })
     }
 
@@ -112,20 +120,22 @@ export async function GET() {
       })
       for (const u of teamUsers) {
         const entries = await prisma.commissionEntry.findMany({
-          where: { userId: u.id, period: currentPeriod },
+          where: { userId: u.id, period: currentQuarterPeriod },
         })
         const total = entries.reduce((s, e) => s + Number(e.commissionAmount), 0)
         const uTarget = await prisma.target.findUnique({
-          where: { userId_period: { userId: u.id, period: currentPeriod } },
+          where: { userId_period: { userId: u.id, period: currentQuarterPeriod } },
         })
-        const att = uTarget ? total / Number(uTarget.nfiTargetGBP) : 0
+        const att = uTarget && Number(uTarget.nfiTargetGBP) > 0 ? total / Number(uTarget.nfiTargetGBP) : 0
         topReps.push({ name: u.name, total, attainment: att })
       }
       topReps.sort((a, b) => b.total - a.total)
     }
 
     return NextResponse.json({
-      currentPeriod,
+      currentPeriod: currentQuarterLabel,
+      currentFY,
+      currentQuarter: currentQuarterPeriod,
       totalDeals: placements.length + pipelinePlacements.length,
       closedWonDeals: placements.length,
       openDeals: pipelinePlacements.length,
@@ -137,7 +147,7 @@ export async function GET() {
       currentQuota,
       currentRevenue: totalRevenue.toNumber(),
       attainmentPct,
-      monthlyData,
+      monthlyData: quarterlyData,
       topReps: topReps.slice(0, 10),
     })
   } catch (error) {

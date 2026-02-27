@@ -113,7 +113,7 @@ export default function DashboardPage() {
         <div className="card p-6 mb-6">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <h3 className="font-semibold text-gray-900">Monthly Target Attainment</h3>
+              <h3 className="font-semibold text-gray-900">Quarterly Target Attainment</h3>
               <p className="text-sm text-gray-500">
                 {formatCurrency(data.currentRevenue)} of {formatCurrency(data.currentQuota)} target
               </p>
@@ -153,7 +153,7 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 card p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">NFI vs Target</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Quarterly NFI vs Target</h3>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={data.monthlyData}>

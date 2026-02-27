@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { getQuartersForFY } from '@/lib/fiscal-year'
 
 export async function GET(req: NextRequest) {
   try {
@@ -11,6 +12,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const period = searchParams.get('period')
     const userId = searchParams.get('userId')
+    const fiscalYear = searchParams.get('fiscalYear')
 
     const { role } = session.user
     const where: Record<string, unknown> = {}
@@ -27,12 +29,18 @@ export async function GET(req: NextRequest) {
       where.userId = userId
     }
 
-    if (period) where.period = period
+    if (period) {
+      where.period = period
+    } else if (fiscalYear) {
+      // Filter by all quarters in this fiscal year
+      const quarters = getQuartersForFY(fiscalYear)
+      where.period = { in: quarters }
+    }
 
     const targets = await prisma.target.findMany({
       where,
       include: { user: { select: { id: true, name: true, email: true } } },
-      orderBy: [{ period: 'desc' }, { userId: 'asc' }],
+      orderBy: [{ period: 'asc' }, { userId: 'asc' }],
     })
 
     return NextResponse.json(targets)
