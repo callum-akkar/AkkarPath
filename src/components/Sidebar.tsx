@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { signOut } from 'next-auth/react'
+import { useState, useEffect } from 'react'
 
 interface User {
   id: string
@@ -25,6 +26,22 @@ export default function Sidebar({ user }: { user: User }) {
   const pathname = usePathname()
   const isAdmin = user.role === 'ADMIN'
   const isManager = user.role === 'MANAGER'
+  const [mobileOpen, setMobileOpen] = useState(false)
+
+  // Close mobile menu on route change
+  useEffect(() => {
+    setMobileOpen(false)
+  }, [pathname])
+
+  // Prevent body scroll when mobile menu is open
+  useEffect(() => {
+    if (mobileOpen) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = ''
+    }
+    return () => { document.body.style.overflow = '' }
+  }, [mobileOpen])
 
   const filteredNav = navItems.filter((item) => {
     if (item.adminOnly) return isAdmin
@@ -32,9 +49,9 @@ export default function Sidebar({ user }: { user: User }) {
     return true
   })
 
-  return (
-    <aside className="fixed inset-y-0 left-0 w-64 bg-[#2b323a] flex flex-col">
-      <div className="p-6 border-b border-white/10">
+  const sidebarContent = (
+    <>
+      <div className="p-6 border-b border-white/10 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-brand-600 text-white flex items-center justify-center font-bold text-lg font-heading">
             A
@@ -44,9 +61,18 @@ export default function Sidebar({ user }: { user: User }) {
             <p className="text-xs text-gray-400">Commissions</p>
           </div>
         </div>
+        <button
+          onClick={() => setMobileOpen(false)}
+          className="md:hidden text-gray-400 hover:text-white p-1"
+          aria-label="Close menu"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
       </div>
 
-      <nav className="flex-1 p-4 space-y-1">
+      <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
         {filteredNav.map((item) => {
           const isActive = pathname === item.href ||
             (item.href !== '/dashboard' && pathname.startsWith(item.href))
@@ -93,6 +119,49 @@ export default function Sidebar({ user }: { user: User }) {
           Sign out
         </button>
       </div>
-    </aside>
+    </>
+  )
+
+  return (
+    <>
+      {/* Mobile top bar */}
+      <div className="fixed top-0 left-0 right-0 h-14 bg-[#2b323a] flex items-center px-4 z-40 md:hidden">
+        <button
+          onClick={() => setMobileOpen(true)}
+          className="text-white p-1.5 -ml-1.5"
+          aria-label="Open menu"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+        <div className="flex items-center gap-2 ml-3">
+          <div className="w-7 h-7 rounded-lg bg-brand-600 text-white flex items-center justify-center font-bold text-sm font-heading">
+            A
+          </div>
+          <span className="font-bold text-white font-heading text-sm">Akkar</span>
+        </div>
+      </div>
+
+      {/* Mobile sidebar overlay */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-50 md:hidden"
+          onClick={() => setMobileOpen(false)}
+        >
+          <aside
+            className="fixed inset-y-0 left-0 w-64 bg-[#2b323a] flex flex-col z-50"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {sidebarContent}
+          </aside>
+        </div>
+      )}
+
+      {/* Desktop sidebar */}
+      <aside className="hidden md:flex fixed inset-y-0 left-0 w-64 bg-[#2b323a] flex-col z-30">
+        {sidebarContent}
+      </aside>
+    </>
   )
 }

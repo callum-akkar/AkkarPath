@@ -147,12 +147,12 @@ export default function CommissionsPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Commissions</h1>
           <p className="text-gray-500 text-sm mt-1">Commission entries for {period}</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <input
             type="month"
             value={period}
@@ -185,8 +185,8 @@ export default function CommissionsPage() {
       </div>
 
       {/* Summary bar */}
-      <div className="card p-4 mb-6 flex items-center justify-between">
-        <div className="flex gap-6">
+      <div className="card p-4 mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-4 sm:gap-6">
           <div>
             <span className="text-sm text-gray-500">Total Entries: </span>
             <span className="font-semibold">{pagination.total}</span>

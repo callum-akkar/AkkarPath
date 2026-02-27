@@ -54,6 +54,10 @@ export class SalesforceService {
     }))
   }
 
+  // TODO: When SF has a Start_Date__c field on the User/Contact object,
+  // pull it during sync and populate User.startDate in the database.
+  // Example: user.startDate = record.Start_Date__c ? new Date(record.Start_Date__c) : null
+
   // Build SF user ID → internal User ID map
   private async buildUserMap(): Promise<Map<string, string>> {
     const users = await prisma.user.findMany({
