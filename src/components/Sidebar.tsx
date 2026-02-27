@@ -33,15 +33,15 @@ export default function Sidebar({ user }: { user: User }) {
   })
 
   return (
-    <aside className="fixed inset-y-0 left-0 w-64 bg-white border-r border-gray-200 flex flex-col">
-      <div className="p-6 border-b border-gray-100">
+    <aside className="fixed inset-y-0 left-0 w-64 bg-[#2b323a] flex flex-col">
+      <div className="p-6 border-b border-white/10">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-brand-600 text-white flex items-center justify-center font-bold text-lg">
+          <div className="w-10 h-10 rounded-xl bg-brand-600 text-white flex items-center justify-center font-bold text-lg font-heading">
             A
           </div>
           <div>
-            <h2 className="font-bold text-gray-900">Akkar</h2>
-            <p className="text-xs text-gray-500">Commissions</p>
+            <h2 className="font-bold text-white font-heading">Akkar</h2>
+            <p className="text-xs text-gray-400">Commissions</p>
           </div>
         </div>
       </div>
@@ -57,8 +57,8 @@ export default function Sidebar({ user }: { user: User }) {
               href={item.href}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                 isActive
-                  ? 'bg-brand-50 text-brand-700'
-                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                  ? 'bg-white/10 text-[#60f2c4]'
+                  : 'text-gray-300 hover:bg-white/5 hover:text-[#60f2c4]'
               }`}
             >
               <svg
@@ -76,19 +76,19 @@ export default function Sidebar({ user }: { user: User }) {
         })}
       </nav>
 
-      <div className="p-4 border-t border-gray-100">
+      <div className="p-4 border-t border-white/10">
         <div className="flex items-center gap-3 mb-3">
-          <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-sm font-medium">
+          <div className="w-8 h-8 rounded-full bg-brand-600 text-white flex items-center justify-center text-sm font-medium">
             {user.name.charAt(0).toUpperCase()}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-900 truncate">{user.name}</p>
-            <p className="text-xs text-gray-500 truncate">{user.role}</p>
+            <p className="text-sm font-medium text-white truncate">{user.name}</p>
+            <p className="text-xs text-gray-400 truncate">{user.role}</p>
           </div>
         </div>
         <button
           onClick={() => signOut({ callbackUrl: '/login' })}
-          className="w-full text-left px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition-colors"
+          className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:text-[#60f2c4] hover:bg-white/5 rounded-lg transition-colors"
         >
           Sign out
         </button>

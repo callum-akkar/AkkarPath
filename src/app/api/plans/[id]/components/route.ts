@@ -48,7 +48,53 @@ export async function POST(
   }
 }
 
-// Delete a component
+// Update a component
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const session = await getServerSession(authOptions)
+    if (!session?.user || session.user.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
+    await params // consume params (planId not needed for update)
+    const body = await req.json()
+    const {
+      componentId, name, type, rate, isPercentage,
+      minValue, maxValue, tier,
+      accountFilter, kickerThreshold,
+    } = body
+
+    if (!componentId) {
+      return NextResponse.json({ error: 'componentId is required' }, { status: 400 })
+    }
+
+    const data: Record<string, unknown> = {}
+    if (name !== undefined) data.name = name
+    if (type !== undefined) data.type = type
+    if (rate !== undefined) data.rate = parseFloat(rate)
+    if (isPercentage !== undefined) data.isPercentage = isPercentage
+    if (minValue !== undefined) data.minValue = minValue ? parseFloat(minValue) : null
+    if (maxValue !== undefined) data.maxValue = maxValue ? parseFloat(maxValue) : null
+    if (tier !== undefined) data.tier = tier ? parseInt(tier) : null
+    if (accountFilter !== undefined) data.accountFilter = accountFilter || null
+    if (kickerThreshold !== undefined) data.kickerThreshold = kickerThreshold ? parseFloat(kickerThreshold) : null
+
+    const component = await prisma.planComponent.update({
+      where: { id: componentId },
+      data,
+    })
+
+    return NextResponse.json(component)
+  } catch (error) {
+    console.error('Component PUT error:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
+
+// Deactivate a component
 export async function DELETE(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)

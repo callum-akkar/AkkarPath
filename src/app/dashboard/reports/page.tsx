@@ -120,6 +120,7 @@ export default function ReportsPage() {
           <button onClick={() => downloadCSV('timesheet')} className="btn-secondary text-sm">Timesheets Only</button>
           <button onClick={() => downloadCSV('payroll')} className="btn-secondary text-sm">Payroll Report</button>
           <button onClick={() => downloadCSV('paid')} className="btn-secondary text-sm">Paid Commissions</button>
+          <button onClick={() => downloadCSV('payroll-summary')} className="btn-primary text-sm">Payroll Summary</button>
         </div>
       </div>
 
