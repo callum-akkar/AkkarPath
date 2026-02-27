@@ -38,17 +38,17 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-brand-50 via-white to-brand-50">
+    <div className="min-h-screen flex items-center justify-center bg-[#212121]">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-brand-600 text-white text-2xl font-bold mb-4">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-brand-600 text-white text-2xl font-bold mb-4 font-heading">
             A
           </div>
-          <h1 className="text-3xl font-bold text-gray-900">Akkar Commissions</h1>
-          <p className="text-gray-500 mt-2">Sign in to your account</p>
+          <h1 className="text-3xl font-bold text-white font-heading">Akkar Commissions</h1>
+          <p className="text-gray-400 mt-2">Sign in to your account</p>
         </div>
 
-        <div className="card p-8">
+        <div className="bg-white rounded-xl border border-gray-200 shadow-lg p-8">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="label">Email</label>
@@ -86,7 +86,7 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div className="mt-4 p-3 rounded-lg bg-blue-50 text-blue-700 text-xs">
+          <div className="mt-4 p-3 rounded-lg bg-brand-50 text-brand-700 text-xs">
             <strong>Contact your admin</strong> to get login credentials. Accounts are
             managed by your administrator.
           </div>

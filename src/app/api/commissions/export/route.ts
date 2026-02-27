@@ -12,8 +12,14 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url)
     const period = searchParams.get('period')
-    const type = searchParams.get('type') || 'all' // all, paid, payroll, placement, timesheet
+    const type = searchParams.get('type') || 'all'
 
+    // Payroll summary: one row per employee
+    if (type === 'payroll-summary') {
+      return handlePayrollSummary(period)
+    }
+
+    // Standard entry-level exports
     const where: Record<string, unknown> = {}
     if (period) where.period = period
 
@@ -37,7 +43,6 @@ export async function GET(req: NextRequest) {
       orderBy: [{ userId: 'asc' }, { createdAt: 'asc' }],
     })
 
-    // Filter by source type if requested
     let filtered = entries
     if (type === 'placement') {
       filtered = entries.filter(e => e.sourceType === 'PLACEMENT')
@@ -45,7 +50,6 @@ export async function GET(req: NextRequest) {
       filtered = entries.filter(e => e.sourceType === 'TIMESHEET')
     }
 
-    // Build CSV
     const headers = [
       'Period',
       'Employee Name',
@@ -112,4 +116,122 @@ export async function GET(req: NextRequest) {
     console.error('Export error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
+}
+
+async function handlePayrollSummary(period: string | null) {
+  // Get all active users
+  const users = await prisma.user.findMany({
+    where: { isActive: true },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      jobTitle: true,
+      department: true,
+      salary: true,
+    },
+    orderBy: { name: 'asc' },
+  })
+
+  // Build commission where clause
+  const commissionWhere: Record<string, unknown> = {
+    status: { in: ['APPROVED', 'PAID'] },
+  }
+  if (period) commissionWhere.period = period
+
+  // Get all commission entries for the period
+  const commissionEntries = await prisma.commissionEntry.findMany({
+    where: commissionWhere,
+    select: {
+      userId: true,
+      commissionAmount: true,
+      status: true,
+    },
+  })
+
+  // Build bonus where clause
+  const bonusWhere: Record<string, unknown> = {
+    status: { in: ['APPROVED', 'PAID'] },
+  }
+  if (period) bonusWhere.period = period
+
+  // Get all bonus entries for the period
+  const bonusEntries = await prisma.bonusEntry.findMany({
+    where: bonusWhere,
+    select: {
+      userId: true,
+      amount: true,
+    },
+  })
+
+  // Aggregate by user
+  const commissionByUser = new Map<string, { total: number; approved: number; paid: number; count: number }>()
+  for (const entry of commissionEntries) {
+    const existing = commissionByUser.get(entry.userId) || { total: 0, approved: 0, paid: 0, count: 0 }
+    const amount = Number(entry.commissionAmount)
+    existing.total += amount
+    existing.count += 1
+    if (entry.status === 'APPROVED') existing.approved += 1
+    if (entry.status === 'PAID') existing.paid += 1
+    commissionByUser.set(entry.userId, existing)
+  }
+
+  const bonusByUser = new Map<string, number>()
+  for (const entry of bonusEntries) {
+    const existing = bonusByUser.get(entry.userId) || 0
+    bonusByUser.set(entry.userId, existing + Number(entry.amount))
+  }
+
+  // Build CSV
+  const headers = [
+    'Employee Name',
+    'Employee Email',
+    'Job Title',
+    'Department',
+    'Base Salary',
+    'Total Commission',
+    'Total Bonus',
+    'Total Pay',
+    'Period',
+    'Number of Entries',
+    'Status Breakdown',
+  ]
+
+  const rows = users.map(user => {
+    const commission = commissionByUser.get(user.id) || { total: 0, approved: 0, paid: 0, count: 0 }
+    const bonus = bonusByUser.get(user.id) || 0
+    const baseSalary = user.salary ? Number(user.salary) : 0
+    const totalPay = baseSalary + commission.total + bonus
+
+    const statusParts = []
+    if (commission.approved > 0) statusParts.push(`${commission.approved} Approved`)
+    if (commission.paid > 0) statusParts.push(`${commission.paid} Paid`)
+    const statusBreakdown = statusParts.length > 0 ? statusParts.join(', ') : 'None'
+
+    return [
+      user.name,
+      user.email,
+      user.jobTitle || '',
+      user.department || '',
+      baseSalary.toFixed(2),
+      commission.total.toFixed(2),
+      bonus.toFixed(2),
+      totalPay.toFixed(2),
+      period || 'All',
+      String(commission.count),
+      statusBreakdown,
+    ]
+  })
+
+  const csv = [
+    headers.join(','),
+    ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')),
+  ].join('\n')
+
+  return new Response(csv, {
+    headers: {
+      'Content-Type': 'text/csv',
+      'Content-Disposition': `attachment; filename="payroll-summary-${period || 'all'}.csv"`,
+    },
+  })
 }
