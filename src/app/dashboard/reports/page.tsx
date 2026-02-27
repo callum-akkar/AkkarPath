@@ -11,6 +11,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts'
+import { getFiscalYear, getFiscalPeriod, getQuartersForFY, getQuarterLabel, getFiscalYearOptions } from '@/lib/fiscal-year'
 
 interface ReportEntry {
   userName: string
@@ -27,18 +28,26 @@ function formatCurrency(amount: number) {
   return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', minimumFractionDigits: 0 }).format(amount)
 }
 
-function dateToPeriod(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-}
-
 export default function ReportsPage() {
-  const [period, setPeriod] = useState(dateToPeriod(new Date()))
+  const [fiscalYear, setFiscalYear] = useState(() => getFiscalYear(new Date()))
+  const [selectedQuarter, setSelectedQuarter] = useState(() => getFiscalPeriod(new Date()))
   const [reportData, setReportData] = useState<ReportEntry[]>([])
   const [loading, setLoading] = useState(true)
 
+  const fyOptions = getFiscalYearOptions(6)
+  const quarters = getQuartersForFY(fiscalYear)
+
+  // When FY changes, default to Q1 of that FY if current selection is invalid
+  useEffect(() => {
+    const newQuarters = getQuartersForFY(fiscalYear)
+    if (!newQuarters.includes(selectedQuarter)) {
+      setSelectedQuarter(newQuarters[0])
+    }
+  }, [fiscalYear, selectedQuarter])
+
   const loadReport = useCallback(async () => {
     setLoading(true)
-    const res = await fetch(`/api/commissions?period=${period}&limit=1000`)
+    const res = await fetch(`/api/commissions?period=${selectedQuarter}&limit=1000`)
     const data = await res.json()
     const entries = data.entries || []
 
@@ -67,12 +76,12 @@ export default function ReportsPage() {
 
     setReportData(Array.from(byUser.values()).sort((a, b) => b.totalCommission - a.totalCommission))
     setLoading(false)
-  }, [period])
+  }, [selectedQuarter])
 
   useEffect(() => { loadReport() }, [loadReport])
 
   function downloadCSV(type: string) {
-    const url = `/api/commissions/export?period=${period}&type=${type}`
+    const url = `/api/commissions/export?period=${selectedQuarter}&type=${type}`
     window.open(url, '_blank')
   }
 
@@ -88,7 +97,26 @@ export default function ReportsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
           <p className="text-gray-500 text-sm mt-1">Commission reports and exports</p>
         </div>
-        <input type="month" value={period} onChange={e => setPeriod(e.target.value)} className="input" />
+        <div className="flex items-center gap-3">
+          <select
+            value={fiscalYear}
+            onChange={e => setFiscalYear(e.target.value)}
+            className="input"
+          >
+            {fyOptions.map(fy => (
+              <option key={fy} value={fy}>{fy.replace('FY', 'FY ')}</option>
+            ))}
+          </select>
+          <select
+            value={selectedQuarter}
+            onChange={e => setSelectedQuarter(e.target.value)}
+            className="input"
+          >
+            {quarters.map((q, i) => (
+              <option key={q} value={q}>{getQuarterLabel(i + 1)}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -163,7 +191,7 @@ export default function ReportsPage() {
               {loading ? (
                 <tr><td colSpan={4} className="table-cell text-center text-gray-500">Loading...</td></tr>
               ) : reportData.length === 0 ? (
-                <tr><td colSpan={4} className="table-cell text-center text-gray-500">No commission data for this period</td></tr>
+                <tr><td colSpan={4} className="table-cell text-center text-gray-500">No commission data for this quarter</td></tr>
               ) : (
                 reportData.map(r => (
                   <tr key={r.userId} className="border-b border-gray-50 hover:bg-gray-50">

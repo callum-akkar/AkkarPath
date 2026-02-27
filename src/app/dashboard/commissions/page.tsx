@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useSession } from 'next-auth/react'
 
 interface CommissionEntry {
@@ -8,7 +8,7 @@ interface CommissionEntry {
   userId: string
   user: { id: string; name: string; email: string }
   planComponent: { id: string; name: string; type: string } | null
-  sourcePlacement: { id: string; name: string; salesforceId: string; candidateName: string; account?: { name: string } } | null
+  sourcePlacement: { id: string; name: string; salesforceId: string; candidateName: string; placementType?: string; account?: { name: string } } | null
   sourceTimesheet: { id: string; name: string; salesforceId: string; candidateName: string; account?: { name: string } } | null
   sourceType: string
   period: string
@@ -46,16 +46,30 @@ export default function CommissionsPage() {
   const [loading, setLoading] = useState(true)
   const [period, setPeriod] = useState(dateToPeriod(new Date()))
   const [statusFilter, setStatusFilter] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [pagination, setPagination] = useState({ page: 1, total: 0, totalPages: 0 })
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>()
 
   const isAdmin = session?.user?.role === 'ADMIN'
   const isManager = session?.user?.role === 'MANAGER'
+
+  // Debounce search input
+  function handleSearchChange(value: string) {
+    setSearchQuery(value)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      setDebouncedSearch(value)
+      setPagination(p => ({ ...p, page: 1 }))
+    }, 300)
+  }
 
   const loadEntries = useCallback(async () => {
     setLoading(true)
     const params = new URLSearchParams({ period, page: String(pagination.page), limit: '50' })
     if (statusFilter) params.set('status', statusFilter)
+    if (debouncedSearch.trim()) params.set('search', debouncedSearch.trim())
 
     const res = await fetch(`/api/commissions?${params}`)
     const data = await res.json()
@@ -63,9 +77,25 @@ export default function CommissionsPage() {
     setPagination(data.pagination || { page: 1, total: 0, totalPages: 0 })
     setSelectedIds(new Set())
     setLoading(false)
-  }, [period, statusFilter, pagination.page])
+  }, [period, statusFilter, debouncedSearch, pagination.page])
 
   useEffect(() => { loadEntries() }, [loadEntries])
+
+  // Client-side search filtering for instant results
+  const filteredEntries = searchQuery.trim() && searchQuery !== debouncedSearch
+    ? entries.filter(entry => {
+        const term = searchQuery.trim().toLowerCase()
+        const source = entry.sourcePlacement || entry.sourceTimesheet
+        const accountName = entry.sourcePlacement?.account?.name || entry.sourceTimesheet?.account?.name || ''
+        return (
+          (source?.name || '').toLowerCase().includes(term) ||
+          (source?.salesforceId || '').toLowerCase().includes(term) ||
+          (source?.candidateName || '').toLowerCase().includes(term) ||
+          accountName.toLowerCase().includes(term) ||
+          entry.user.name.toLowerCase().includes(term)
+        )
+      })
+    : entries
 
   async function handleAction(entryId: string, action: string) {
     await fetch(`/api/commissions/${entryId}`, {
@@ -106,14 +136,14 @@ export default function CommissionsPage() {
   }
 
   function toggleSelectAll() {
-    if (selectedIds.size === entries.length) {
+    if (selectedIds.size === filteredEntries.length) {
       setSelectedIds(new Set())
     } else {
-      setSelectedIds(new Set(entries.map(e => e.id)))
+      setSelectedIds(new Set(filteredEntries.map(e => e.id)))
     }
   }
 
-  const totalCommission = entries.reduce((sum, e) => sum + Number(e.commissionAmount), 0)
+  const totalCommission = filteredEntries.reduce((sum, e) => sum + Number(e.commissionAmount), 0)
 
   return (
     <div>
@@ -141,6 +171,17 @@ export default function CommissionsPage() {
             <option value="HELD">Held</option>
           </select>
         </div>
+      </div>
+
+      {/* Search bar */}
+      <div className="mb-4">
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => handleSearchChange(e.target.value)}
+          placeholder="Search by source name, SF ID, candidate, account, or rep name..."
+          className="input w-full"
+        />
       </div>
 
       {/* Summary bar */}
@@ -179,9 +220,9 @@ export default function CommissionsPage() {
         <div className="flex items-center justify-center h-32">
           <div className="text-gray-500">Loading...</div>
         </div>
-      ) : entries.length === 0 ? (
+      ) : filteredEntries.length === 0 ? (
         <div className="card p-8 text-center text-gray-500">
-          No commission entries found for this period.
+          No commission entries found{searchQuery ? ' matching your search' : ' for this period'}.
         </div>
       ) : (
         <div className="card overflow-hidden">
@@ -191,7 +232,7 @@ export default function CommissionsPage() {
                 <tr className="border-b border-gray-100">
                   {(isAdmin || isManager) && (
                     <th className="table-header w-10">
-                      <input type="checkbox" checked={selectedIds.size === entries.length} onChange={toggleSelectAll} />
+                      <input type="checkbox" checked={selectedIds.size === filteredEntries.length && filteredEntries.length > 0} onChange={toggleSelectAll} />
                     </th>
                   )}
                   {(isAdmin || isManager) && <th className="table-header">Rep</th>}
@@ -206,9 +247,11 @@ export default function CommissionsPage() {
                 </tr>
               </thead>
               <tbody>
-                {entries.map((entry) => {
+                {filteredEntries.map((entry) => {
                   const source = entry.sourcePlacement || entry.sourceTimesheet
                   const accountName = entry.sourcePlacement?.account?.name || entry.sourceTimesheet?.account?.name || ''
+                  const sfId = source?.salesforceId
+                  const placementType = entry.sourcePlacement?.placementType
                   return (
                     <tr key={entry.id} className={`border-b border-gray-50 hover:bg-gray-50 ${entry.isClawback ? 'bg-red-50' : ''}`}>
                       {(isAdmin || isManager) && (
@@ -223,7 +266,21 @@ export default function CommissionsPage() {
                       )}
                       <td className="table-cell">
                         <p className="text-sm font-medium">{source?.name || 'Manual'}</p>
-                        <p className="text-xs text-gray-500">{entry.sourceType}{entry.isClawback ? ' (Clawback)' : ''}</p>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="text-xs text-gray-500">{entry.sourceType}{entry.isClawback ? ' (Clawback)' : ''}</span>
+                          {placementType && (
+                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                              placementType === 'PERM' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
+                            }`}>
+                              {placementType}
+                            </span>
+                          )}
+                        </div>
+                        {sfId && (
+                          <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-mono">
+                            {sfId}
+                          </span>
+                        )}
                       </td>
                       <td className="table-cell">
                         <p className="text-sm">{source?.candidateName || '-'}</p>

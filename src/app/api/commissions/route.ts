@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
     const period = searchParams.get('period')
     const status = searchParams.get('status')
     const userIdParam = searchParams.get('userId')
+    const search = searchParams.get('search')
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '50')
 
@@ -41,13 +42,26 @@ export async function GET(req: NextRequest) {
     if (period) where.period = period
     if (status) where.status = status
 
+    // Server-side search across multiple fields
+    if (search && search.trim()) {
+      const term = search.trim()
+      where.OR = [
+        { sourcePlacement: { salesforceId: { contains: term, mode: 'insensitive' } } },
+        { sourcePlacement: { name: { contains: term, mode: 'insensitive' } } },
+        { sourcePlacement: { candidateName: { contains: term, mode: 'insensitive' } } },
+        { sourceTimesheet: { salesforceId: { contains: term, mode: 'insensitive' } } },
+        { sourceTimesheet: { name: { contains: term, mode: 'insensitive' } } },
+        { user: { name: { contains: term, mode: 'insensitive' } } },
+      ]
+    }
+
     const [entries, total] = await Promise.all([
       prisma.commissionEntry.findMany({
         where,
         include: {
           user: { select: { id: true, name: true, email: true } },
           planComponent: { select: { id: true, name: true, type: true } },
-          sourcePlacement: { select: { id: true, name: true, salesforceId: true, candidateName: true, account: { select: { name: true } } } },
+          sourcePlacement: { select: { id: true, name: true, salesforceId: true, candidateName: true, placementType: true, account: { select: { name: true } } } },
           sourceTimesheet: { select: { id: true, name: true, salesforceId: true, candidateName: true, account: { select: { name: true } } } },
         },
         orderBy: { createdAt: 'desc' },

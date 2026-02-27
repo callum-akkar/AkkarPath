@@ -148,7 +148,7 @@ model Target {
   id                     String   @id @default(cuid())
   userId                 String
   user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  period                 String   // YYYY-MM
+  period                 String   // Fiscal quarter format: FY26/27-Q1
   nfiTargetGBP           Decimal  @db.Decimal(12, 2)
   placementTargetCount   Int?
   contractRevenueTarget  Decimal? @db.Decimal(12, 2)
