@@ -6,7 +6,7 @@ interface PlanComponent {
   id: string
   name: string
   type: string
-  rate: number
+  rate: number | null
   isPercentage: boolean
   minValue: number | null
   maxValue: number | null
@@ -14,6 +14,14 @@ interface PlanComponent {
   accountFilter: string | null
   kickerThreshold: number | null
   isActive: boolean
+  triggerType: string | null
+  triggerValue: number | null
+  triggerCondition: string | null
+  clientAccountId: string | null
+  clientAccount: { id: string; name: string } | null
+  excludeOwnDeals: boolean
+  flatAmount: number | null
+  notes: string | null
 }
 
 interface Assignment {
@@ -36,16 +44,116 @@ interface Plan {
   _count: { assignments: number }
 }
 
-const componentTypes = [
-  { value: 'PLACEMENT_PERM', label: 'Permanent Placements' },
-  { value: 'PLACEMENT_CONTRACT', label: 'Contract Placements' },
-  { value: 'TIMESHEET', label: 'Timesheets' },
-  { value: 'BONUS_FLAT', label: 'Flat Bonus' },
-  { value: 'KICKER', label: 'Kicker' },
-  { value: 'OVERRIDE', label: 'Manager Override' },
+interface SFAccount {
+  id: string
+  name: string
+  salesforceId: string
+}
+
+const componentTypeGroups = [
+  {
+    label: 'Placement',
+    types: [
+      { value: 'PLACEMENT_PERM', label: 'Permanent Placements' },
+      { value: 'PLACEMENT_CONTRACT', label: 'Contract Placements' },
+      { value: 'TIMESHEET', label: 'Timesheets' },
+    ],
+  },
+  {
+    label: 'Manager Override',
+    types: [
+      { value: 'MANAGER_OVERRIDE_PERM', label: 'Manager Override — Perm' },
+      { value: 'MANAGER_OVERRIDE_CONTRACT', label: 'Manager Override — Contract' },
+    ],
+  },
+  {
+    label: 'Account Management',
+    types: [
+      { value: 'AM_CLIENT_PERM', label: 'AM Client — Perm' },
+      { value: 'AM_CLIENT_CONTRACT', label: 'AM Client — Contract' },
+    ],
+  },
+  {
+    label: 'Business Development',
+    types: [
+      { value: 'BD_ONGOING', label: 'BD Ongoing Commission' },
+    ],
+  },
+  {
+    label: 'Bonuses',
+    types: [
+      { value: 'BONUS_FLAT', label: 'Flat Bonus' },
+      { value: 'BONUS_NEW_CLIENT', label: 'New Client Bonus' },
+      { value: 'BONUS_QUARTERLY_TARGET', label: 'Quarterly Target Bonus' },
+      { value: 'BONUS_MILESTONE', label: 'Milestone Bonus' },
+    ],
+  },
+  {
+    label: 'Overrides & Kickers',
+    types: [
+      { value: 'KICKER', label: 'Kicker' },
+      { value: 'OVERRIDE', label: 'Override' },
+    ],
+  },
 ]
 
-const emptyCompForm = { name: '', type: 'PLACEMENT_PERM', rate: '', isPercentage: true, minValue: '', maxValue: '', tier: '', accountFilter: '', kickerThreshold: '' }
+const allComponentTypes = componentTypeGroups.flatMap(g => g.types)
+
+function getTypeLabel(type: string): string {
+  return allComponentTypes.find(t => t.value === type)?.label || type
+}
+
+// Which field sets are relevant for each component type
+function showRate(type: string): boolean {
+  return ['PLACEMENT_PERM', 'PLACEMENT_CONTRACT', 'TIMESHEET', 'MANAGER_OVERRIDE_PERM', 'MANAGER_OVERRIDE_CONTRACT', 'AM_CLIENT_PERM', 'AM_CLIENT_CONTRACT', 'BD_ONGOING', 'KICKER', 'OVERRIDE'].includes(type)
+}
+function showFlatAmount(type: string): boolean {
+  return ['BONUS_FLAT', 'BONUS_NEW_CLIENT', 'BONUS_QUARTERLY_TARGET', 'BONUS_MILESTONE', 'OVERRIDE'].includes(type)
+}
+function showExcludeOwnDeals(type: string): boolean {
+  return ['MANAGER_OVERRIDE_PERM', 'MANAGER_OVERRIDE_CONTRACT'].includes(type)
+}
+function showClientAccount(type: string): boolean {
+  return ['AM_CLIENT_PERM', 'AM_CLIENT_CONTRACT'].includes(type)
+}
+function showTriggerValue(type: string): boolean {
+  return ['BONUS_QUARTERLY_TARGET', 'BONUS_MILESTONE', 'KICKER'].includes(type)
+}
+function showTriggerCondition(type: string): boolean {
+  return ['BONUS_MILESTONE'].includes(type)
+}
+function showNotes(type: string): boolean {
+  return true // always show notes
+}
+function showTierFields(type: string): boolean {
+  return ['PLACEMENT_PERM', 'PLACEMENT_CONTRACT', 'TIMESHEET'].includes(type)
+}
+
+interface CompFormState {
+  name: string
+  type: string
+  rate: string
+  isPercentage: boolean
+  minValue: string
+  maxValue: string
+  tier: string
+  accountFilter: string
+  kickerThreshold: string
+  triggerType: string
+  triggerValue: string
+  triggerCondition: string
+  clientAccountId: string
+  excludeOwnDeals: boolean
+  flatAmount: string
+  notes: string
+}
+
+const emptyCompForm: CompFormState = {
+  name: '', type: 'PLACEMENT_PERM', rate: '', isPercentage: true,
+  minValue: '', maxValue: '', tier: '', accountFilter: '', kickerThreshold: '',
+  triggerType: '', triggerValue: '', triggerCondition: '',
+  clientAccountId: '', excludeOwnDeals: false, flatAmount: '', notes: '',
+}
 
 export default function PlansPage() {
   const [plans, setPlans] = useState<Plan[]>([])
@@ -58,10 +166,11 @@ export default function PlansPage() {
   const [editingCompId, setEditingCompId] = useState<string | null>(null)
   const [cloningPlanId, setCloningPlanId] = useState<string | null>(null)
   const [users, setUsers] = useState<{ id: string; name: string; email: string }[]>([])
+  const [sfAccounts, setSfAccounts] = useState<SFAccount[]>([])
 
   // Form states
   const [planForm, setPlanForm] = useState({ name: '', description: '', fiscalYear: String(new Date().getFullYear()), currency: 'GBP' })
-  const [compForm, setCompForm] = useState(emptyCompForm)
+  const [compForm, setCompForm] = useState<CompFormState>(emptyCompForm)
   const [assignForm, setAssignForm] = useState({ userId: '', startDate: '', endDate: '' })
   const [cloneForm, setCloneForm] = useState({ newName: '', newFiscalYear: '' })
 
@@ -77,6 +186,10 @@ export default function PlansPage() {
 
   useEffect(() => {
     fetch('/api/users').then(r => r.json()).then(d => setUsers(Array.isArray(d) ? d : []))
+    // Load SF accounts for the client account dropdown
+    fetch('/api/targets?type=accounts').then(r => r.json()).then(d => {
+      if (Array.isArray(d)) setSfAccounts(d)
+    }).catch(() => {})
   }, [])
 
   const plan = plans.find(p => p.id === selectedPlan)
@@ -125,12 +238,18 @@ export default function PlansPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...compForm,
-        rate: compForm.rate,
+        rate: compForm.rate || undefined,
         minValue: compForm.minValue || undefined,
         maxValue: compForm.maxValue || undefined,
         tier: compForm.tier || undefined,
         accountFilter: compForm.accountFilter || undefined,
         kickerThreshold: compForm.kickerThreshold || undefined,
+        triggerType: compForm.triggerType || undefined,
+        triggerValue: compForm.triggerValue || undefined,
+        triggerCondition: compForm.triggerCondition || undefined,
+        clientAccountId: compForm.clientAccountId || undefined,
+        flatAmount: compForm.flatAmount || undefined,
+        notes: compForm.notes || undefined,
       }),
     })
     setShowAddComponent(false)
@@ -143,13 +262,20 @@ export default function PlansPage() {
     setCompForm({
       name: comp.name,
       type: comp.type,
-      rate: String(Number(comp.rate)),
+      rate: comp.rate !== null ? String(Number(comp.rate)) : '',
       isPercentage: comp.isPercentage,
       minValue: comp.minValue !== null ? String(Number(comp.minValue)) : '',
       maxValue: comp.maxValue !== null ? String(Number(comp.maxValue)) : '',
       tier: comp.tier !== null ? String(comp.tier) : '',
       accountFilter: comp.accountFilter || '',
       kickerThreshold: comp.kickerThreshold !== null ? String(Number(comp.kickerThreshold)) : '',
+      triggerType: comp.triggerType || '',
+      triggerValue: comp.triggerValue !== null ? String(Number(comp.triggerValue)) : '',
+      triggerCondition: comp.triggerCondition || '',
+      clientAccountId: comp.clientAccountId || '',
+      excludeOwnDeals: comp.excludeOwnDeals,
+      flatAmount: comp.flatAmount !== null ? String(Number(comp.flatAmount)) : '',
+      notes: comp.notes || '',
     })
   }
 
@@ -160,15 +286,19 @@ export default function PlansPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         componentId: editingCompId,
-        name: compForm.name,
-        type: compForm.type,
-        rate: compForm.rate,
-        isPercentage: compForm.isPercentage,
+        ...compForm,
+        rate: compForm.rate || undefined,
         minValue: compForm.minValue || undefined,
         maxValue: compForm.maxValue || undefined,
         tier: compForm.tier || undefined,
         accountFilter: compForm.accountFilter || undefined,
         kickerThreshold: compForm.kickerThreshold || undefined,
+        triggerType: compForm.triggerType || undefined,
+        triggerValue: compForm.triggerValue || undefined,
+        triggerCondition: compForm.triggerCondition || undefined,
+        clientAccountId: compForm.clientAccountId || undefined,
+        flatAmount: compForm.flatAmount || undefined,
+        notes: compForm.notes || undefined,
       }),
     })
     setEditingCompId(null)
@@ -214,7 +344,6 @@ export default function PlansPage() {
 
   function startClonePlan(p: Plan) {
     setCloningPlanId(p.id)
-    // Pre-fill with next fiscal year guess
     const currentYear = new Date().getFullYear()
     const nextFY = `FY${String(currentYear).slice(2)}/${String(currentYear + 1).slice(2)}`
     setCloneForm({ newName: `${p.name} (Copy)`, newFiscalYear: p.fiscalYear || nextFY })
@@ -237,50 +366,108 @@ export default function PlansPage() {
   }
 
   function renderComponentForm(isNew: boolean) {
+    const type = compForm.type
+
     return (
       <div className="p-4 bg-gray-50 rounded-lg mb-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
+          {/* Name */}
+          <div className="sm:col-span-2">
             <label className="label">Name</label>
             <input className="input" value={compForm.name} onChange={e => setCompForm({ ...compForm, name: e.target.value })} placeholder="e.g. Permanent Placements" />
           </div>
-          <div>
+
+          {/* Type dropdown with grouped options */}
+          <div className="sm:col-span-2">
             <label className="label">Type</label>
-            <select className="input" value={compForm.type} onChange={e => setCompForm({ ...compForm, type: e.target.value })}>
-              {componentTypes.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            <select className="input" value={type} onChange={e => setCompForm({ ...compForm, type: e.target.value })}>
+              {componentTypeGroups.map(group => (
+                <optgroup key={group.label} label={group.label}>
+                  {group.types.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </optgroup>
+              ))}
             </select>
           </div>
-          <div>
-            <label className="label">Rate (decimal, e.g. 0.10 = 10%)</label>
-            <input className="input" type="number" step="0.000001" value={compForm.rate} onChange={e => setCompForm({ ...compForm, rate: e.target.value })} />
-          </div>
-          <div>
-            <label className="label">Rate Type</label>
-            <select className="input" value={compForm.isPercentage ? 'pct' : 'flat'} onChange={e => setCompForm({ ...compForm, isPercentage: e.target.value === 'pct' })}>
-              <option value="pct">Percentage</option>
-              <option value="flat">Flat Amount</option>
-            </select>
-          </div>
-          <div>
-            <label className="label">Min Value (tier)</label>
-            <input className="input" type="number" value={compForm.minValue} onChange={e => setCompForm({ ...compForm, minValue: e.target.value })} />
-          </div>
-          <div>
-            <label className="label">Max Value (tier)</label>
-            <input className="input" type="number" value={compForm.maxValue} onChange={e => setCompForm({ ...compForm, maxValue: e.target.value })} />
-          </div>
-          <div>
-            <label className="label">Tier Number</label>
-            <input className="input" type="number" value={compForm.tier} onChange={e => setCompForm({ ...compForm, tier: e.target.value })} />
-          </div>
-          <div>
-            <label className="label">Account Filter</label>
-            <input className="input" value={compForm.accountFilter} onChange={e => setCompForm({ ...compForm, accountFilter: e.target.value })} placeholder="e.g. Mobileye" />
-          </div>
-          {compForm.type === 'KICKER' && (
+
+          {/* Rate field (for percentage-based types) */}
+          {showRate(type) && (
+            <div>
+              <label className="label">Rate (decimal, e.g. 0.10 = 10%)</label>
+              <input className="input" type="number" step="0.000001" value={compForm.rate} onChange={e => setCompForm({ ...compForm, rate: e.target.value })} />
+            </div>
+          )}
+
+          {/* Flat amount (for bonus/override types) */}
+          {showFlatAmount(type) && (
+            <div>
+              <label className="label">Flat Amount (£)</label>
+              <input className="input" type="number" step="0.01" value={compForm.flatAmount} onChange={e => setCompForm({ ...compForm, flatAmount: e.target.value })} placeholder="e.g. 1000" />
+            </div>
+          )}
+
+          {/* Exclude own deals checkbox */}
+          {showExcludeOwnDeals(type) && (
+            <div className="sm:col-span-2 flex items-center gap-2 p-3 bg-blue-50 rounded-lg">
+              <input type="checkbox" id="excludeOwn" checked={compForm.excludeOwnDeals} onChange={e => setCompForm({ ...compForm, excludeOwnDeals: e.target.checked })} className="w-4 h-4" />
+              <label htmlFor="excludeOwn" className="text-sm text-gray-700">Exclude manager&apos;s own deals (only count team revenue)</label>
+            </div>
+          )}
+
+          {/* Client account dropdown */}
+          {showClientAccount(type) && (
             <div className="sm:col-span-2">
-              <label className="label">Kicker Threshold (NFI)</label>
-              <input className="input" type="number" value={compForm.kickerThreshold} onChange={e => setCompForm({ ...compForm, kickerThreshold: e.target.value })} />
+              <label className="label">Client Account</label>
+              <select className="input" value={compForm.clientAccountId} onChange={e => setCompForm({ ...compForm, clientAccountId: e.target.value })}>
+                <option value="">Select client account...</option>
+                {sfAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+          )}
+
+          {/* Trigger value (for bonus/kicker threshold) */}
+          {showTriggerValue(type) && (
+            <div>
+              <label className="label">{type === 'KICKER' ? 'Kicker Threshold (£)' : 'Target/Milestone Value (£)'}</label>
+              <input className="input" type="number" step="0.01" value={compForm.triggerValue} onChange={e => setCompForm({ ...compForm, triggerValue: e.target.value })} placeholder="e.g. 35000" />
+            </div>
+          )}
+
+          {/* Trigger condition dropdown */}
+          {showTriggerCondition(type) && (
+            <div>
+              <label className="label">Trigger Condition</label>
+              <select className="input" value={compForm.triggerCondition} onChange={e => setCompForm({ ...compForm, triggerCondition: e.target.value })}>
+                <option value="">Select...</option>
+                <option value="gte">Greater than or equal (≥)</option>
+                <option value="gt">Greater than (&gt;)</option>
+                <option value="eq">Equal (=)</option>
+              </select>
+            </div>
+          )}
+
+          {/* Tier fields */}
+          {showTierFields(type) && (
+            <>
+              <div>
+                <label className="label">Min Value (tier)</label>
+                <input className="input" type="number" value={compForm.minValue} onChange={e => setCompForm({ ...compForm, minValue: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Max Value (tier)</label>
+                <input className="input" type="number" value={compForm.maxValue} onChange={e => setCompForm({ ...compForm, maxValue: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Tier Number</label>
+                <input className="input" type="number" value={compForm.tier} onChange={e => setCompForm({ ...compForm, tier: e.target.value })} />
+              </div>
+            </>
+          )}
+
+          {/* Notes */}
+          {showNotes(type) && (
+            <div className="sm:col-span-2">
+              <label className="label">Notes</label>
+              <input className="input" value={compForm.notes} onChange={e => setCompForm({ ...compForm, notes: e.target.value })} placeholder="Description of what this component does" />
             </div>
           )}
         </div>
@@ -291,6 +478,64 @@ export default function PlansPage() {
           <button onClick={isNew ? () => setShowAddComponent(false) : cancelEditComponent} className="btn-secondary text-sm">
             Cancel
           </button>
+        </div>
+      </div>
+    )
+  }
+
+  function renderComponentDisplay(comp: PlanComponent) {
+    const hasRate = comp.rate !== null && comp.rate !== undefined
+    const hasFlatAmount = comp.flatAmount !== null && comp.flatAmount !== undefined
+    return (
+      <div key={comp.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium">{comp.name}</p>
+          <p className="text-xs text-gray-500">
+            {getTypeLabel(comp.type)}
+            {comp.tier !== null && ` (Tier ${comp.tier})`}
+            {comp.clientAccount && ` — ${comp.clientAccount.name}`}
+            {comp.accountFilter && ` — ${comp.accountFilter}`}
+            {comp.excludeOwnDeals && ' — Excl. own deals'}
+          </p>
+          {comp.notes && <p className="text-xs text-gray-400 mt-0.5 truncate">{comp.notes}</p>}
+        </div>
+        <div className="flex items-center gap-3 ml-3">
+          <div className="text-right">
+            {hasRate && (
+              <p className="text-sm font-semibold">
+                {(Number(comp.rate) * 100).toFixed(1)}%
+              </p>
+            )}
+            {hasFlatAmount && (
+              <p className="text-sm font-semibold text-emerald-600">
+                £{Number(comp.flatAmount).toLocaleString()}
+              </p>
+            )}
+            {comp.triggerValue !== null && (
+              <p className="text-xs text-gray-500">
+                Trigger: £{Number(comp.triggerValue).toLocaleString()}
+              </p>
+            )}
+            {comp.minValue !== null && (
+              <p className="text-xs text-gray-500">
+                £{Number(comp.minValue).toLocaleString()} - {comp.maxValue ? `£${Number(comp.maxValue).toLocaleString()}` : '∞'}
+              </p>
+            )}
+          </div>
+          <div className="flex gap-1">
+            <button
+              onClick={() => startEditComponent(comp)}
+              className="text-xs text-brand-600 hover:text-brand-700 font-medium"
+            >
+              Edit
+            </button>
+            <button
+              onClick={() => deactivateComponent(comp.id)}
+              className="text-xs text-red-600 hover:text-red-700 font-medium"
+            >
+              Deactivate
+            </button>
+          </div>
         </div>
       </div>
     )
@@ -447,42 +692,7 @@ export default function PlansPage() {
                       {renderComponentForm(false)}
                     </div>
                   ) : (
-                    <div key={comp.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <div>
-                        <p className="text-sm font-medium">{comp.name}</p>
-                        <p className="text-xs text-gray-500">
-                          {componentTypes.find(t => t.value === comp.type)?.label || comp.type}
-                          {comp.tier !== null && ` (Tier ${comp.tier})`}
-                          {comp.accountFilter && ` - ${comp.accountFilter}`}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className="text-right">
-                          <p className="text-sm font-semibold">
-                            {comp.isPercentage ? `${(Number(comp.rate) * 100).toFixed(1)}%` : `£${Number(comp.rate).toFixed(2)}`}
-                          </p>
-                          {comp.minValue !== null && (
-                            <p className="text-xs text-gray-500">
-                              £{Number(comp.minValue).toLocaleString()} - {comp.maxValue ? `£${Number(comp.maxValue).toLocaleString()}` : '∞'}
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => startEditComponent(comp)}
-                            className="text-xs text-brand-600 hover:text-brand-700 font-medium"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => deactivateComponent(comp.id)}
-                            className="text-xs text-red-600 hover:text-red-700 font-medium"
-                          >
-                            Deactivate
-                          </button>
-                        </div>
-                      </div>
-                    </div>
+                    renderComponentDisplay(comp)
                   )
                 ))}
                 {plan.components.filter(c => c.isActive).length === 0 && (

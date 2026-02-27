@@ -102,12 +102,31 @@ model CommissionPlan {
 }
 
 enum ComponentType {
-  PLACEMENT_PERM
-  PLACEMENT_CONTRACT
-  TIMESHEET
-  BONUS_FLAT
-  KICKER
-  OVERRIDE
+  // Core placement types
+  PLACEMENT_PERM            // % of permanent placement NFI
+  PLACEMENT_CONTRACT        // % of contract placement margin/value
+  TIMESHEET                 // % of timesheet value
+
+  // Manager override types (% of their team's revenue, excluding their own deals)
+  MANAGER_OVERRIDE_PERM     // Manager gets X% of team's perm placements
+  MANAGER_OVERRIDE_CONTRACT // Manager gets X% of team's contract placements
+
+  // Account Management types (% per specific client)
+  AM_CLIENT_PERM            // AM gets X% on a specific client's perm placements
+  AM_CLIENT_CONTRACT        // AM gets X% on a specific client's contract placements
+
+  // Business Development
+  BD_ONGOING                // BD gets ongoing X% on timesheets for deals they originated
+
+  // Bonus types
+  BONUS_FLAT                // Flat £ amount bonus (e.g. £1000 new client bonus)
+  BONUS_NEW_CLIENT          // Flat bonus triggered when a new client is won
+  BONUS_QUARTERLY_TARGET    // Bonus paid when quarterly target is hit (e.g. "High Roller")
+  BONUS_MILESTONE           // Flat bonus at billing milestones (e.g. £1k at £50k NFI, £5k at £100k)
+
+  // Override/kicker types
+  KICKER                    // Higher % kicks in after hitting a threshold
+  OVERRIDE                  // Manual override amount (e.g. ad-hoc bonus, clawback correction)
 }
 
 model PlanComponent {
@@ -116,7 +135,7 @@ model PlanComponent {
   commissionPlan  CommissionPlan @relation(fields: [commissionPlanId], references: [id], onDelete: Cascade)
   name            String        // e.g. "Permanent Placements", "Mobileye - Contract Placements"
   type            ComponentType
-  rate            Decimal       @db.Decimal(10, 6) // e.g. 0.100000 = 10%
+  rate            Decimal?      @db.Decimal(10, 6) // e.g. 0.100000 = 10% (nullable for flat-only components)
   isPercentage    Boolean       @default(true)     // false = flat GBP amount
   minValue        Decimal?      @db.Decimal(12, 2) // tier min
   maxValue        Decimal?      @db.Decimal(12, 2) // tier max
@@ -126,6 +145,16 @@ model PlanComponent {
   isActive        Boolean       @default(true)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
+
+  // Conditional/trigger fields
+  triggerType      String?   // "new_client" | "quarterly_target" | "milestone" | "threshold" | null
+  triggerValue     Decimal?  @db.Decimal(12, 2)  // The threshold value that triggers this component
+  triggerCondition String?   // "gte" | "gt" | "eq" | null — how to compare against triggerValue
+  clientAccountId  String?   // For AM_CLIENT_* types: the specific SFAccount this applies to
+  clientAccount    SFAccount? @relation(fields: [clientAccountId], references: [id])
+  excludeOwnDeals  Boolean   @default(false)  // For MANAGER_OVERRIDE_*: exclude the manager's own deals
+  flatAmount       Decimal?  @db.Decimal(12, 2)  // For BONUS_FLAT, BONUS_NEW_CLIENT etc: the fixed £ amount
+  notes            String?   // Free-text description of what this component does
 
   commissionEntries CommissionEntry[]
   userAssignments   UserPlanAssignment[] @relation("AssignedComponents")
@@ -197,9 +226,10 @@ model SFAccount {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  placements    Placement[]
-  timesheets    Timesheet[]
-  clientTargets ClientTarget[]
+  placements     Placement[]
+  timesheets     Timesheet[]
+  clientTargets  ClientTarget[]
+  planComponents PlanComponent[]
 }
 
 enum PlacementType {

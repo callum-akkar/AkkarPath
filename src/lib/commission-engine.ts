@@ -82,12 +82,12 @@ function findTierRate(components: PlanComponent[], nfiValue: Decimal): Decimal {
     const max = comp.maxValue ? new Decimal(comp.maxValue.toString()) : null
 
     if (nfiValue.gte(min) && (!max || nfiValue.lt(max))) {
-      return new Decimal(comp.rate.toString())
+      return comp.rate ? new Decimal(comp.rate.toString()) : new Decimal(0)
     }
   }
 
   // Default to first tier if nothing matches
-  return sorted.length > 0 ? new Decimal(sorted[0].rate.toString()) : new Decimal(0)
+  return sorted.length > 0 && sorted[0].rate ? new Decimal(sorted[0].rate.toString()) : new Decimal(0)
 }
 
 function calculateAmount(
@@ -241,7 +241,7 @@ export async function calculateCommissions(
         if (comps.length > 1 && comps[0].tier !== null) {
           rate = findTierRate(comps, record.nfiValue.abs())
         } else {
-          rate = new Decimal(representative.rate.toString())
+          rate = representative.rate ? new Decimal(representative.rate.toString()) : new Decimal(0)
         }
 
         const commissionAmount = calculateAmount(record.nfiValue, rate, representative.isPercentage)
@@ -289,7 +289,7 @@ export async function calculateCommissions(
 
       if (threshold && totalNfi.gte(threshold)) {
         // Kicker activated — apply to all eligible records retroactively
-        const rate = new Decimal(kicker.rate.toString())
+        const rate = kicker.rate ? new Decimal(kicker.rate.toString()) : new Decimal(0)
 
         for (const record of records) {
           if (record.ownerUserId !== userId) continue
