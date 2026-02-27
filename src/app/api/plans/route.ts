@@ -15,7 +15,10 @@ export async function GET() {
 
     const plans = await prisma.commissionPlan.findMany({
       include: {
-        components: { orderBy: [{ type: 'asc' }, { tier: 'asc' }] },
+        components: {
+          orderBy: [{ type: 'asc' }, { tier: 'asc' }],
+          include: { clientAccount: { select: { id: true, name: true } } },
+        },
         assignments: {
           include: {
             user: { select: { id: true, name: true, email: true } },
