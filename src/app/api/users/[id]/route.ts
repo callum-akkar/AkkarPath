@@ -67,8 +67,43 @@ export async function PUT(
     const {
       name, email, password, role, managerId,
       isActive, salesforceUserId, jobTitle, department,
+      startDate, salary,
     } = body
 
+    // ─── Validation ─────────────────────────────────────────────
+    const warnings: string[] = []
+
+    // Cannot be own manager
+    if (managerId !== undefined && managerId === id) {
+      return NextResponse.json({ error: 'A user cannot be their own manager' }, { status: 400 })
+    }
+
+    // Circular reference check (one level deep)
+    if (managerId) {
+      const proposedManager = await prisma.user.findUnique({
+        where: { id: managerId },
+        select: { managerId: true },
+      })
+      if (proposedManager?.managerId === id) {
+        return NextResponse.json(
+          { error: 'Circular reference: the selected manager already reports to this user' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Warn if demoting a MANAGER with direct reports
+    if (role && role !== 'MANAGER') {
+      const current = await prisma.user.findUnique({
+        where: { id },
+        select: { role: true, _count: { select: { directReports: true } } },
+      })
+      if (current?.role === 'MANAGER' && current._count.directReports > 0) {
+        warnings.push(`This user has ${current._count.directReports} direct report(s) who will need to be reassigned`)
+      }
+    }
+
+    // ─── Build update data ──────────────────────────────────────
     const data: Record<string, unknown> = {}
     if (name !== undefined) data.name = name
     if (email !== undefined) data.email = email
@@ -78,6 +113,8 @@ export async function PUT(
     if (salesforceUserId !== undefined) data.salesforceUserId = salesforceUserId || null
     if (jobTitle !== undefined) data.jobTitle = jobTitle || null
     if (department !== undefined) data.department = department || null
+    if (startDate !== undefined) data.startDate = startDate ? new Date(startDate) : null
+    if (salary !== undefined) data.salary = salary !== null && salary !== '' ? parseFloat(salary) : null
     if (password) data.passwordHash = await bcrypt.hash(password, 12)
 
     const user = await prisma.user.update({
@@ -90,12 +127,17 @@ export async function PUT(
         role: true,
         isActive: true,
         managerId: true,
+        manager: { select: { id: true, name: true } },
+        directReports: { select: { id: true, name: true, role: true } },
         jobTitle: true,
         department: true,
+        startDate: true,
+        salary: true,
+        salesforceUserId: true,
       },
     })
 
-    return NextResponse.json(user)
+    return NextResponse.json({ ...user, warnings })
   } catch (error) {
     console.error('User PUT error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

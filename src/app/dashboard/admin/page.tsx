@@ -29,7 +29,7 @@ export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreateUser, setShowCreateUser] = useState(false)
-  const [editingUser, setEditingUser] = useState<string | null>(null)
+
 
   // User form
   const [userForm, setUserForm] = useState({ name: '', email: '', password: '', role: 'REP', managerId: '', salesforceUserId: '', jobTitle: '' })
@@ -66,16 +66,6 @@ export default function AdminPage() {
     })
     setShowCreateUser(false)
     setUserForm({ name: '', email: '', password: '', role: 'REP', managerId: '', salesforceUserId: '', jobTitle: '' })
-    loadUsers()
-  }
-
-  async function updateUser(id: string, data: Record<string, unknown>) {
-    await fetch(`/api/users/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    })
-    setEditingUser(null)
     loadUsers()
   }
 
@@ -170,7 +160,10 @@ export default function AdminPage() {
       {tab === 'users' && (
         <div>
           <div className="flex items-center justify-between mb-4">
-            <span className="text-sm text-gray-500">{users.length} users</span>
+            <div className="flex items-center gap-4">
+              <span className="text-sm text-gray-500">{users.length} users</span>
+              <a href="/dashboard/team" className="text-sm text-brand-600 hover:text-brand-700 font-medium">Manage team structure &rarr;</a>
+            </div>
             <button onClick={() => setShowCreateUser(true)} className="btn-primary">Create User</button>
           </div>
 
@@ -231,21 +224,9 @@ export default function AdminPage() {
                     </td>
                     <td className="table-cell text-sm">{user.email}</td>
                     <td className="table-cell">
-                      {editingUser === user.id ? (
-                        <select
-                          className="input text-sm"
-                          defaultValue={user.role}
-                          onChange={e => updateUser(user.id, { role: e.target.value })}
-                        >
-                          <option value="REP">REP</option>
-                          <option value="MANAGER">MANAGER</option>
-                          <option value="ADMIN">ADMIN</option>
-                        </select>
-                      ) : (
-                        <span className={`text-xs font-medium ${user.role === 'ADMIN' ? 'text-purple-600' : user.role === 'MANAGER' ? 'text-blue-600' : 'text-gray-600'}`}>
-                          {user.role}
-                        </span>
-                      )}
+                      <span className={`text-xs font-medium ${user.role === 'ADMIN' ? 'text-purple-600' : user.role === 'MANAGER' ? 'text-blue-600' : 'text-gray-600'}`}>
+                        {user.role}
+                      </span>
                     </td>
                     <td className="table-cell text-sm text-gray-600">{user.manager?.name || '-'}</td>
                     <td className="table-cell text-xs text-gray-500 font-mono">{user.salesforceUserId || '-'}</td>
@@ -255,17 +236,9 @@ export default function AdminPage() {
                       </span>
                     </td>
                     <td className="table-cell">
-                      <div className="flex gap-2">
-                        <button onClick={() => setEditingUser(editingUser === user.id ? null : user.id)} className="text-xs text-brand-600 hover:text-brand-700">
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => updateUser(user.id, { isActive: !user.isActive })}
-                          className={`text-xs ${user.isActive ? 'text-red-600 hover:text-red-700' : 'text-emerald-600 hover:text-emerald-700'}`}
-                        >
-                          {user.isActive ? 'Deactivate' : 'Activate'}
-                        </button>
-                      </div>
+                      <a href="/dashboard/team" className="text-xs text-brand-600 hover:text-brand-700">
+                        Edit in Team &rarr;
+                      </a>
                     </td>
                   </tr>
                 ))}
