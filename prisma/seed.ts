@@ -107,203 +107,157 @@ async function main() {
 
   // ─── Commission Plans ─────────────────────────────────────────────
 
-  // Helper: delete existing plans by name to make seed idempotent
-  const planNames = [
-    'Bonuses + Perm/Contract Placements - 2025',
-    'Recruitment Manager - Pat (2025)',
-    'Recruitment Manager - Bella (2025)',
-    'Recruitment Manager - Jon (2025)',
-    'Ed Winbow - Account Management - 2025',
-    'Katy Prior - Account Management - 2025',
-    'Business Development - 2025',
-  ]
-  for (const pn of planNames) {
-    const existing = await prisma.commissionPlan.findFirst({ where: { name: pn } })
-    if (existing) {
-      await prisma.userPlanAssignment.deleteMany({ where: { commissionPlanId: existing.id } })
-      await prisma.commissionEntry.updateMany({ where: { planComponent: { commissionPlanId: existing.id } }, data: { planComponentId: null } })
-      await prisma.planComponent.deleteMany({ where: { commissionPlanId: existing.id } })
-      await prisma.commissionPlan.delete({ where: { id: existing.id } })
-    }
-  }
-
   const planStartDate = new Date('2025-01-01')
+
+  // Helper: upsert a plan with deterministic ID, then recreate its components and assignments.
+  // Components/assignments are deleted first so the create() calls are guaranteed safe on re-runs.
+  type ComponentDef = Record<string, unknown> & { name: string; type: string }
+
+  async function seedPlan(
+    planId: string,
+    planData: { name: string; description: string; fiscalYear: string; currency: string },
+    componentDefs: ComponentDef[],
+    assigneeEmails: string[],
+  ) {
+    // 1. Upsert the plan itself (deterministic ID)
+    await prisma.commissionPlan.upsert({
+      where: { id: planId },
+      update: { name: planData.name, description: planData.description, fiscalYear: planData.fiscalYear, currency: planData.currency },
+      create: { id: planId, ...planData },
+    })
+
+    // 2. Clean up old assignments and components (handles FK constraints)
+    await prisma.userPlanAssignment.deleteMany({ where: { commissionPlanId: planId } })
+    await prisma.commissionEntry.updateMany({
+      where: { planComponent: { commissionPlanId: planId } },
+      data: { planComponentId: null },
+    })
+    await prisma.planComponent.deleteMany({ where: { commissionPlanId: planId } })
+
+    // 3. Create fresh components
+    const components = []
+    for (const cd of componentDefs) {
+      const comp = await prisma.planComponent.create({
+        data: { commissionPlanId: planId, ...cd } as never,
+      })
+      components.push(comp)
+    }
+
+    // 4. Create fresh assignments
+    for (const email of assigneeEmails) {
+      const userId = userMap.get(email)
+      if (userId) {
+        await prisma.userPlanAssignment.create({
+          data: {
+            userId,
+            commissionPlanId: planId,
+            startDate: planStartDate,
+            components: { connect: components.map(c => ({ id: c.id })) },
+          },
+        })
+      }
+    }
+
+    console.log(`  Seeded plan: ${planData.name}`)
+  }
 
   // ── Plan 1: Bonuses + Perm/Contract Placements ────────────────────
 
-  const plan1 = await prisma.commissionPlan.create({
-    data: {
-      name: 'Bonuses + Perm/Contract Placements - 2025',
-      description: 'Standard recruiter plan with perm/contract commission, new client bonus, and quarterly target bonus',
-      fiscalYear: '2025',
-      currency: 'GBP',
-      components: {
-        create: [
-          { name: 'Permanent Placements', type: 'PLACEMENT_PERM', rate: 0.10, isPercentage: true, notes: '10% of permanent placement NFI' },
-          { name: 'Contract Placements', type: 'PLACEMENT_CONTRACT', rate: 0.15, isPercentage: true, notes: '15% of contract placement margin (some reps have 20%)' },
-          { name: 'New Client Bonus', type: 'BONUS_NEW_CLIENT', rate: null, isPercentage: false, flatAmount: 1000, notes: '£1,000 flat bonus for winning a new client' },
-          { name: 'High Roller Quarterly Bonus 2025', type: 'BONUS_QUARTERLY_TARGET', rate: null, isPercentage: false, flatAmount: 1000, triggerType: 'quarterly_target', triggerValue: 35000, notes: '£1,000 bonus if quarterly NFI exceeds £35k' },
-          { name: 'Override (2)', type: 'OVERRIDE', rate: null, isPercentage: false, flatAmount: 2000, notes: 'Manual override bonus — ad hoc' },
-          { name: 'Override (4)', type: 'OVERRIDE', rate: null, isPercentage: false, notes: 'Manual override — variable amount' },
-        ],
-      },
-    },
-    include: { components: true },
-  })
-
-  const plan1Assignees = [
+  await seedPlan('seed-plan-1', {
+    name: 'Bonuses + Perm/Contract Placements - 2025',
+    description: 'Standard recruiter plan with perm/contract commission, new client bonus, and quarterly target bonus',
+    fiscalYear: '2025',
+    currency: 'GBP',
+  }, [
+    { name: 'Permanent Placements', type: 'PLACEMENT_PERM', rate: 0.10, isPercentage: true, notes: '10% of permanent placement NFI' },
+    { name: 'Contract Placements', type: 'PLACEMENT_CONTRACT', rate: 0.15, isPercentage: true, notes: '15% of contract placement margin (some reps have 20%)' },
+    { name: 'New Client Bonus', type: 'BONUS_NEW_CLIENT', rate: null, isPercentage: false, flatAmount: 1000, notes: '£1,000 flat bonus for winning a new client' },
+    { name: 'High Roller Quarterly Bonus 2025', type: 'BONUS_QUARTERLY_TARGET', rate: null, isPercentage: false, flatAmount: 1000, triggerType: 'quarterly_target', triggerValue: 35000, notes: '£1,000 bonus if quarterly NFI exceeds £35k' },
+    { name: 'Override (2)', type: 'OVERRIDE', rate: null, isPercentage: false, flatAmount: 2000, notes: 'Manual override bonus — ad hoc' },
+    { name: 'Override (4)', type: 'OVERRIDE', rate: null, isPercentage: false, notes: 'Manual override — variable amount' },
+  ], [
     'ben@akkar.com', 'david@akkar.com', 'sam@akkar.com', 'cyoung@akkar.com',
     'bobby@akkar.com', 'kris@akkar.com', 'shubhangi@akkar.com', 'dcourtney@akkar.com',
     'djewell@akkar.com', 'theo@akkar.com', 'jake@akkar.com', 'ddenkl@akkar.com',
     'luiza@akkar.com', 'isabella@akkar.com', 'joel@akkar.com', 'patrick@akkar.com',
     'edward@akkar.com',
-  ]
-
-  for (const email of plan1Assignees) {
-    const userId = userMap.get(email)
-    if (userId) {
-      await prisma.userPlanAssignment.create({
-        data: { userId, commissionPlanId: plan1.id, startDate: planStartDate, components: { connect: plan1.components.map(c => ({ id: c.id })) } },
-      })
-    }
-  }
-  console.log('  Created Plan 1: Bonuses + Perm/Contract Placements - 2025')
+  ])
 
   // ── Plan 2: Recruitment Manager - Pat ─────────────────────────────
 
-  const plan2 = await prisma.commissionPlan.create({
-    data: {
-      name: 'Recruitment Manager - Pat (2025)',
-      description: 'Manager override for Patrick Scott — AI team',
-      fiscalYear: '2025',
-      currency: 'GBP',
-      components: {
-        create: [
-          { name: 'Recruitment Manager - AI Perm Placements (Excluding Pat)', type: 'MANAGER_OVERRIDE_PERM', rate: 0.01, isPercentage: true, excludeOwnDeals: true, notes: "1% of AI team's perm placement revenue, excluding Pat's own deals" },
-          { name: 'Recruitment Manager - AI Contract (Excluding Pat)', type: 'MANAGER_OVERRIDE_CONTRACT', rate: 0.01, isPercentage: true, excludeOwnDeals: true, notes: "1% of AI team's contract revenue, excluding Pat's own deals" },
-        ],
-      },
-    },
-    include: { components: true },
-  })
-  await prisma.userPlanAssignment.create({
-    data: { userId: userMap.get('patrick@akkar.com')!, commissionPlanId: plan2.id, startDate: planStartDate, components: { connect: plan2.components.map(c => ({ id: c.id })) } },
-  })
-  console.log('  Created Plan 2: Recruitment Manager - Pat (2025)')
+  await seedPlan('seed-plan-2', {
+    name: 'Recruitment Manager - Pat (2025)',
+    description: 'Manager override for Patrick Scott — AI team',
+    fiscalYear: '2025',
+    currency: 'GBP',
+  }, [
+    { name: 'Recruitment Manager - AI Perm Placements (Excluding Pat)', type: 'MANAGER_OVERRIDE_PERM', rate: 0.01, isPercentage: true, excludeOwnDeals: true, notes: "1% of AI team's perm placement revenue, excluding Pat's own deals" },
+    { name: 'Recruitment Manager - AI Contract (Excluding Pat)', type: 'MANAGER_OVERRIDE_CONTRACT', rate: 0.01, isPercentage: true, excludeOwnDeals: true, notes: "1% of AI team's contract revenue, excluding Pat's own deals" },
+  ], ['patrick@akkar.com'])
 
   // ── Plan 3: Recruitment Manager - Bella ───────────────────────────
 
-  const plan3 = await prisma.commissionPlan.create({
-    data: {
-      name: 'Recruitment Manager - Bella (2025)',
-      description: 'Manager override for Isabella Smith — Embedded Systems team',
-      fiscalYear: '2025',
-      currency: 'GBP',
-      components: {
-        create: [
-          { name: 'Recruitment Manager - Embedded Systems Perm Placements (Excluding Bella)', type: 'MANAGER_OVERRIDE_PERM', rate: 0.01, isPercentage: true, excludeOwnDeals: true, notes: "1% of Embedded Systems team's perm revenue, excluding Bella's own" },
-          { name: 'Recruitment Manager - Embedded Systems Contract (Excluding Bella)', type: 'MANAGER_OVERRIDE_CONTRACT', rate: 0.01, isPercentage: true, excludeOwnDeals: true, notes: "1% of Embedded Systems team's contract revenue, excluding Bella's own" },
-        ],
-      },
-    },
-    include: { components: true },
-  })
-  await prisma.userPlanAssignment.create({
-    data: { userId: userMap.get('isabella@akkar.com')!, commissionPlanId: plan3.id, startDate: planStartDate, components: { connect: plan3.components.map(c => ({ id: c.id })) } },
-  })
-  console.log('  Created Plan 3: Recruitment Manager - Bella (2025)')
+  await seedPlan('seed-plan-3', {
+    name: 'Recruitment Manager - Bella (2025)',
+    description: 'Manager override for Isabella Smith — Embedded Systems team',
+    fiscalYear: '2025',
+    currency: 'GBP',
+  }, [
+    { name: 'Recruitment Manager - Embedded Systems Perm Placements (Excluding Bella)', type: 'MANAGER_OVERRIDE_PERM', rate: 0.01, isPercentage: true, excludeOwnDeals: true, notes: "1% of Embedded Systems team's perm revenue, excluding Bella's own" },
+    { name: 'Recruitment Manager - Embedded Systems Contract (Excluding Bella)', type: 'MANAGER_OVERRIDE_CONTRACT', rate: 0.01, isPercentage: true, excludeOwnDeals: true, notes: "1% of Embedded Systems team's contract revenue, excluding Bella's own" },
+  ], ['isabella@akkar.com'])
 
   // ── Plan 4: Recruitment Manager - Jon ─────────────────────────────
 
-  const plan4 = await prisma.commissionPlan.create({
-    data: {
-      name: 'Recruitment Manager - Jon (2025)',
-      description: 'Manager override for Jonathan Lant — Supply Chain team',
-      fiscalYear: '2025',
-      currency: 'GBP',
-      components: {
-        create: [
-          { name: "Recruitment Manager - Supply Chain Perm Placements (Excluding Jon)", type: 'MANAGER_OVERRIDE_PERM', rate: 0.01, isPercentage: true, excludeOwnDeals: true, notes: "1% of Supply Chain team's perm revenue, excluding Jon's own" },
-        ],
-      },
-    },
-    include: { components: true },
-  })
-  await prisma.userPlanAssignment.create({
-    data: { userId: userMap.get('jonathan@akkar.com')!, commissionPlanId: plan4.id, startDate: planStartDate, components: { connect: plan4.components.map(c => ({ id: c.id })) } },
-  })
-  console.log('  Created Plan 4: Recruitment Manager - Jon (2025)')
+  await seedPlan('seed-plan-4', {
+    name: 'Recruitment Manager - Jon (2025)',
+    description: 'Manager override for Jonathan Lant — Supply Chain team',
+    fiscalYear: '2025',
+    currency: 'GBP',
+  }, [
+    { name: 'Recruitment Manager - Supply Chain Perm Placements (Excluding Jon)', type: 'MANAGER_OVERRIDE_PERM', rate: 0.01, isPercentage: true, excludeOwnDeals: true, notes: "1% of Supply Chain team's perm revenue, excluding Jon's own" },
+  ], ['jonathan@akkar.com'])
 
   // ── Plan 5: Ed Winbow - Account Management ────────────────────────
 
-  const plan5 = await prisma.commissionPlan.create({
-    data: {
-      name: 'Ed Winbow - Account Management - 2025',
-      description: 'Account management commission for Ed Winbow — client-specific rates',
-      fiscalYear: '2025',
-      currency: 'GBP',
-      components: {
-        create: [
-          { name: 'Mobileye - Permanent Placements', type: 'AM_CLIENT_PERM', rate: 0.007, isPercentage: true, clientAccountId: accountMap.get('Mobileye')! },
-          { name: 'Mobileye - Contract Placements', type: 'AM_CLIENT_CONTRACT', rate: 0.007, isPercentage: true, clientAccountId: accountMap.get('Mobileye')! },
-          { name: 'UL Solutions - Permanent Placements', type: 'AM_CLIENT_PERM', rate: 0.007, isPercentage: true, clientAccountId: accountMap.get('UL Solutions')!, notes: 'Select placements only/no individual bonus' },
-          { name: 'Garrett - Permanent Placements', type: 'AM_CLIENT_PERM', rate: 0.007, isPercentage: true, clientAccountId: accountMap.get('Garrett')! },
-        ],
-      },
-    },
-    include: { components: true },
-  })
-  await prisma.userPlanAssignment.create({
-    data: { userId: userMap.get('edward@akkar.com')!, commissionPlanId: plan5.id, startDate: planStartDate, components: { connect: plan5.components.map(c => ({ id: c.id })) } },
-  })
-  console.log('  Created Plan 5: Ed Winbow - Account Management - 2025')
+  await seedPlan('seed-plan-5', {
+    name: 'Ed Winbow - Account Management - 2025',
+    description: 'Account management commission for Ed Winbow — client-specific rates',
+    fiscalYear: '2025',
+    currency: 'GBP',
+  }, [
+    { name: 'Mobileye - Permanent Placements', type: 'AM_CLIENT_PERM', rate: 0.007, isPercentage: true, clientAccountId: accountMap.get('Mobileye')! },
+    { name: 'Mobileye - Contract Placements', type: 'AM_CLIENT_CONTRACT', rate: 0.007, isPercentage: true, clientAccountId: accountMap.get('Mobileye')! },
+    { name: 'UL Solutions - Permanent Placements', type: 'AM_CLIENT_PERM', rate: 0.007, isPercentage: true, clientAccountId: accountMap.get('UL Solutions')!, notes: 'Select placements only/no individual bonus' },
+    { name: 'Garrett - Permanent Placements', type: 'AM_CLIENT_PERM', rate: 0.007, isPercentage: true, clientAccountId: accountMap.get('Garrett')! },
+  ], ['edward@akkar.com'])
 
   // ── Plan 6: Katy Prior - Account Management ───────────────────────
 
-  const plan6 = await prisma.commissionPlan.create({
-    data: {
-      name: 'Katy Prior - Account Management - 2025',
-      description: 'Account management commission for Katy Prior — client-specific rates',
-      fiscalYear: '2025',
-      currency: 'GBP',
-      components: {
-        create: [
-          { name: 'Stark - Permanent Placements', type: 'AM_CLIENT_PERM', rate: 0.007, isPercentage: true, clientAccountId: accountMap.get('Stark')! },
-          { name: 'Indie Semiconductor - Permanent Placements', type: 'AM_CLIENT_PERM', rate: 0.007, isPercentage: true, clientAccountId: accountMap.get('Indie Semiconductor')! },
-          { name: 'Indie Semiconductor - Contract Placements', type: 'AM_CLIENT_CONTRACT', rate: 0.007, isPercentage: true, clientAccountId: accountMap.get('Indie Semiconductor')! },
-          { name: 'Garrett - Permanent Placements', type: 'AM_CLIENT_PERM', rate: 0.007, isPercentage: true, clientAccountId: accountMap.get('Garrett')! },
-          { name: 'BRUSS Sealing Systems - Permanent Placements', type: 'AM_CLIENT_PERM', rate: 0.007, isPercentage: true, clientAccountId: accountMap.get('BRUSS Sealing Systems')! },
-          { name: 'Singer - Contract Placements', type: 'AM_CLIENT_CONTRACT', rate: 0.007, isPercentage: true, clientAccountId: accountMap.get('Singer')! },
-        ],
-      },
-    },
-    include: { components: true },
-  })
-  await prisma.userPlanAssignment.create({
-    data: { userId: userMap.get('katy@akkar.com')!, commissionPlanId: plan6.id, startDate: planStartDate, components: { connect: plan6.components.map(c => ({ id: c.id })) } },
-  })
-  console.log('  Created Plan 6: Katy Prior - Account Management - 2025')
+  await seedPlan('seed-plan-6', {
+    name: 'Katy Prior - Account Management - 2025',
+    description: 'Account management commission for Katy Prior — client-specific rates',
+    fiscalYear: '2025',
+    currency: 'GBP',
+  }, [
+    { name: 'Stark - Permanent Placements', type: 'AM_CLIENT_PERM', rate: 0.007, isPercentage: true, clientAccountId: accountMap.get('Stark')! },
+    { name: 'Indie Semiconductor - Permanent Placements', type: 'AM_CLIENT_PERM', rate: 0.007, isPercentage: true, clientAccountId: accountMap.get('Indie Semiconductor')! },
+    { name: 'Indie Semiconductor - Contract Placements', type: 'AM_CLIENT_CONTRACT', rate: 0.007, isPercentage: true, clientAccountId: accountMap.get('Indie Semiconductor')! },
+    { name: 'Garrett - Permanent Placements', type: 'AM_CLIENT_PERM', rate: 0.007, isPercentage: true, clientAccountId: accountMap.get('Garrett')! },
+    { name: 'BRUSS Sealing Systems - Permanent Placements', type: 'AM_CLIENT_PERM', rate: 0.007, isPercentage: true, clientAccountId: accountMap.get('BRUSS Sealing Systems')! },
+    { name: 'Singer - Contract Placements', type: 'AM_CLIENT_CONTRACT', rate: 0.007, isPercentage: true, clientAccountId: accountMap.get('Singer')! },
+  ], ['katy@akkar.com'])
 
   // ── Plan 7: Business Development ──────────────────────────────────
 
-  const plan7 = await prisma.commissionPlan.create({
-    data: {
-      name: 'Business Development - 2025',
-      description: 'BD ongoing commission on timesheets for BD-originated placements',
-      fiscalYear: '2025',
-      currency: 'GBP',
-      components: {
-        create: [
-          { name: 'Business Development - Ongoing Commission (Timesheets)', type: 'BD_ONGOING', rate: 0.03, isPercentage: true, notes: '3% ongoing commission on timesheets for BD-originated placements' },
-        ],
-      },
-    },
-    include: { components: true },
-  })
-  await prisma.userPlanAssignment.create({
-    data: { userId: userMap.get('joel@akkar.com')!, commissionPlanId: plan7.id, startDate: planStartDate, components: { connect: plan7.components.map(c => ({ id: c.id })) } },
-  })
-  console.log('  Created Plan 7: Business Development - 2025')
+  await seedPlan('seed-plan-7', {
+    name: 'Business Development - 2025',
+    description: 'BD ongoing commission on timesheets for BD-originated placements',
+    fiscalYear: '2025',
+    currency: 'GBP',
+  }, [
+    { name: 'Business Development - Ongoing Commission (Timesheets)', type: 'BD_ONGOING', rate: 0.03, isPercentage: true, notes: '3% ongoing commission on timesheets for BD-originated placements' },
+  ], ['joel@akkar.com'])
 
   // ─── Sample Placements ────────────────────────────────────────────
 
@@ -367,28 +321,29 @@ async function main() {
 
   const periods = ['2024-07', '2024-10', '2025-01', '2025-04']
 
-  // Clean up old seed commission entries
-  for (const rt of repTotals) {
-    const userId = userMap.get(rt.email)
-    if (userId) {
-      await prisma.commissionEntry.deleteMany({
-        where: { userId, isManualOverride: true, manualOverrideNote: 'Seed data' },
-      })
-    }
-  }
-
   let totalEntries = 0
   for (const rt of repTotals) {
     const userId = userMap.get(rt.email)
     if (!userId) continue
 
+    const emailKey = rt.email.replace('@akkar.com', '')
     const shares = [0.20, 0.25, 0.30, 0.25]
     for (let i = 0; i < periods.length; i++) {
       const commissionAmount = Math.round(rt.total * shares[i] * 100) / 100
       const grossValue = Math.round(commissionAmount / 0.10 * 100) / 100
+      const seedId = `seed-comm-${emailKey}-${periods[i]}`
 
-      await prisma.commissionEntry.create({
-        data: {
+      await prisma.commissionEntry.upsert({
+        where: { id: seedId },
+        update: {
+          grossValue,
+          commissionAmount,
+          rate: 0.10,
+          status: 'PAID',
+          payoutDate: new Date(`${periods[i]}-28`),
+        },
+        create: {
+          id: seedId,
           userId,
           sourceType: 'PLACEMENT',
           period: periods[i],
@@ -404,7 +359,7 @@ async function main() {
       totalEntries++
     }
   }
-  console.log(`  Created ${totalEntries} commission entries`)
+  console.log(`  Upserted ${totalEntries} commission entries`)
 
   // ─── Quarterly Targets (FY25/26) ──────────────────────────────────
 
